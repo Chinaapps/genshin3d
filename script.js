@@ -562,8 +562,8 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
 
   /* ---------- 远山 ---------- */
   (function buildMountains() {
-    const matNear = new THREE.MeshStandardMaterial({ color: 0x8ea79b, roughness: 1, flatShading: true });
-    const matFar = new THREE.MeshStandardMaterial({ color: 0xaebbaf, roughness: 1, flatShading: true });
+    const matNear = new THREE.MeshStandardMaterial({ color: 0x7c978b, roughness: 1, flatShading: true });
+    const matFar = new THREE.MeshStandardMaterial({ color: 0x9db2a7, roughness: 1, flatShading: true });
     // 近层：成组的双锥山脊，宽窄不一
     for (let i = 0; i < 18; i++) {
       const a = (i / 18) * Math.PI * 2 + rng() * 0.28;
@@ -622,7 +622,7 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
         g.add(tree);
       }
       g.traverse((m) => { if (m.isMesh) m.castShadow = true; });
-      g.position.set(Math.cos(a) * r, 24 + rng() * 10, Math.sin(a) * r);
+      g.position.set(Math.cos(a) * r, 33 + rng() * 11, Math.sin(a) * r);
       g.userData.baseY = g.position.y;
       g.userData.phase = rng() * Math.PI * 2;
       world.add(g);
