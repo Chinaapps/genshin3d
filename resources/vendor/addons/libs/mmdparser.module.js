@@ -18,6 +18,13 @@ CharsetEncoder.prototype.s2u = function(uint8Array) {
   while(p < uint8Array.length) {
     var key = uint8Array[p++];
 
+    // 半角片假名（0x8E 前缀），原版表里缺失会导致骨骼名截断
+    if(key === 0x8e && p < uint8Array.length && uint8Array[p] >= 0xa1 && uint8Array[p] <= 0xdf) {
+      str += String.fromCharCode(0xff61 + uint8Array[p] - 0xa1);
+      p++;
+      continue;
+    }
+
     if(! ((key >= 0x00 && key <= 0x7e) ||
           (key >= 0xa1 && key <= 0xdf)) &&
        p < uint8Array.length) {

@@ -93,13 +93,29 @@
     <div class="toast" id="toast"></div>
   </div>
 
+  <!-- ===================== 启动加载（全屏轮播） ===================== -->
+  <div class="boot" id="boot">
+    <div class="boot-stage" id="boot-stage">
+      <img class="boot-slide is-on" src="resources/loading/boot1.jpg" alt="">
+      <img class="boot-slide" src="resources/loading/boot2.jpg" alt="">
+      <img class="boot-slide" src="resources/loading/boot3.jpg" alt="">
+      <img class="boot-slide" src="resources/loading/boot4.jpg" alt="">
+      <img class="boot-slide" src="resources/loading/boot5.jpg" alt="">
+    </div>
+    <div class="boot-hud">
+      <div class="boot-tip" id="boot-tip">正在进入提瓦特</div>
+      <div class="boot-bar"><i id="boot-fill"></i></div>
+      <div class="boot-pct" id="boot-pct">0%</div>
+    </div>
+    <div class="boot-mark">✦ 提瓦特 · 3D 探索框架</div>
+  </div>
+
   <!-- ===================== 开始界面 ===================== -->
   <div class="start" id="start">
     <div class="start-inner">
       <div class="start-mark">✦</div>
       <h1>提瓦特 · 探索框架</h1>
       <p class="start-sub">冰之女皇 / 雷泽 · 3D 场景 · 战斗与技能 HUD</p>
-      <div class="load"><i id="load-bar"></i></div>
       <ul class="keys">
         <li><b>WASD</b> 移动　<b>Shift</b> 冲刺　<b>空格</b> 跳跃</li>
         <li><b>拖动画面</b> 转视角　<b>滚轮</b> 缩放</li>

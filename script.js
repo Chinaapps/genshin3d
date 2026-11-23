@@ -528,6 +528,8 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
   /* ---------- MMD 模型（PMX 本地加载：冰之女皇 / 雷泽 / verity） ---------- */
   // PMX 模型本地正面朝 +Z，与游戏 heading=0（+Z）同向，无需额外旋转
   const MMD_YAW_FIX = 0;
+  // 笑脸怪的 PMX 与角色朝向相反，单独补 180°
+  const VERITY_YAW_FIX = 0;
   const mmdLoader = new MMDLoader();
   const MMD_PATHS = {
     anastasya: './resources/models/anastasya/anastasya.pmx',
@@ -586,6 +588,33 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
     return { holder, inner, mesh, bones };
   }
 
+  // VMD 跑步动作（女：女运动中跑 / 男：男快跑）
+  const MOTION_PATHS = {
+    anastasya: './resources/motion/run_f.vmd',
+    razor: './resources/motion/run_m.vmd',
+  };
+  const vmdLoader = new MMDLoader();
+
+  function attachMotion(asset, url) {
+    return new Promise((resolve) => {
+      // loadAnimation 会把 VMD 轨道自动绑定到模型骨骼上
+      vmdLoader.loadAnimation(url, asset.mesh, (clip) => {
+        if (!clip || !clip.tracks || !clip.tracks.length) return resolve(false);
+        asset.mixclips = clip;
+        asset.mixer = new THREE.AnimationMixer(asset.mesh);
+        asset.runAction = asset.mixer.clipAction(clip);
+        asset.runAction.setLoop(THREE.LoopRepeat, Infinity);
+        asset.runAction.clampWhenFinished = false;
+        asset.running = false;
+        asset.motionName = clip.tracks.length + ' 条轨道 · ' + clip.duration.toFixed(2) + 's';
+        resolve(true);
+      }, undefined, (err) => {
+        console.warn('[VMD] 载入失败：' + url, err && err.message);
+        resolve(false);
+      });
+    });
+  }
+
   function applyMmdForActive() {
     mmdPlayers.forEach((a, i) => { if (a) a.holder.visible = i === state.active; });
     const asset = mmdPlayers[state.active];
@@ -603,8 +632,33 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
     if (asset) asset.holder.position.copy(player.root.position);
   }
 
-  // 程序化骨骼动画（没有 VMD 动作文件，用走路/待机/攻击/跳跃姿态）
+  // 程序化骨骼动画（无 VMD 时的兜底：走路/待机/攻击/跳跃姿态）
   function animateMmd(asset, dt, moving) {
+    if (!asset) return;
+
+    /* ---------- 有跑步 VMD：移动交给动作，静止/跳跃回程序化 ---------- */
+    if (asset.runAction) {
+      const wantRun = moving && !player.airborne && player.swingT <= 0;
+      if (wantRun && !asset.running) {
+        asset.running = true;
+        asset.runAction.reset();
+        asset.runAction.setEffectiveTimeScale(state.sprinting ? 1.4 : 1.1);
+        asset.runAction.play();
+      } else if (!wantRun && asset.running) {
+        asset.running = false;
+        asset.runAction.stop();
+        // 复位全部骨骼，避免停留在动作的最后一帧
+        Object.keys(asset.bones.base).forEach((k) => {
+          const b = asset.bones.map[k];
+          if (b) b.rotation.copy(asset.bones.base[k]);
+        });
+      }
+      if (asset.running) {
+        asset.mixer.update(dt);
+        return;
+      }
+    }
+
     const map = asset.bones.map, base = asset.bones.base;
     if (!map['センター'] && !map['上半身']) return;
     const set = (name, axis, v) => {
@@ -635,7 +689,7 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
     }
 
     // MMD 默认是 T-pose，肩部绕 Z 收拢让手臂自然下垂（左负右正）
-    const armDown = 0.62;
+    const armDown = 0.42;
     const armSway = moving ? sw * 0.05 * amp : 0;
     set('左肩', 'z', -armDown - armSway);
     set('右肩', 'z', armDown + armSway);
@@ -676,7 +730,7 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
       if (m.material.length === 1) m.material = m.material[0];
     });
     const holder = new THREE.Group();
-    holder.rotation.y = MMD_YAW_FIX;
+    holder.rotation.y = VERITY_YAW_FIX;
     holder.add(mesh);
     en.children.slice().forEach((c) => { c.visible = false; });
     en.add(holder);
@@ -687,6 +741,7 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
   function onModelsReady() {
     mmdPlayers.forEach((a, i) => { if (a) a.holder.visible = state.started ? i === state.active : false; });
     applyMmdForActive();
+    finishBoot();
     if (mmdDone.failed === 0) toast('角色模型载入完成 · 冰之女皇 / 雷泽', 2200);
   }
 
@@ -696,7 +751,10 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
       mmdDone.n++;
       const prepared = mesh ? prepareMmd(mesh, PARTY[i].modelHeight) : null;
       mmdPlayers[i] = prepared;
-      if (prepared) applyMmdForActive();
+      if (prepared) {
+        await attachMotion(prepared, MOTION_PATHS[PARTY[i].model]);
+        applyMmdForActive();
+      }
     }
     const vm = await loadMmd(MMD_PATHS.verity, 'verity');
     mmdDone.n++;
@@ -1692,21 +1750,59 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
   /* =========================================================
      16. 开场
      ========================================================= */
-  let progress = 0;
-  ui.startBtn.textContent = '正在载入角色模型…';
-  const loadTick = setInterval(() => {
-    // 进度跟随 PMX 模型加载（三个文件），加载完后补满
-    const target = 12 + (mmdDone.n / mmdDone.total) * 88;
-    progress = Math.min(target, progress + 6);
-    if (mmdDone.n >= mmdDone.total) progress = Math.min(100, progress + 8);
-    ui.loadBar.style.width = progress.toFixed(1) + '%';
-    if (progress >= 99.5) {
-      clearInterval(loadTick);
-      ui.loadBar.style.width = '100%';
+  /* ---------- 启动加载：全屏图轮播 + 真实进度 ---------- */
+  const bootEl = document.getElementById('boot');
+  const bootStage = document.getElementById('boot-stage');
+  const bootFill = document.getElementById('boot-fill');
+  const bootPct = document.getElementById('boot-pct');
+  const bootTip = document.getElementById('boot-tip');
+  const bootSlides = bootStage ? Array.from(bootStage.querySelectorAll('.boot-slide')) : [];
+  // 前两张各 1s，其余 0.5s，循环直到模型加载完毕
+  const BOOT_DURS = [1000, 1000, 500, 500, 500];
+  let bootIdx = 0;
+  let bootTimer = 0;
+  let bootDone = false;
+  let bootProgress = 0;
+
+  function showBootSlide(i) {
+    bootSlides.forEach((s, k) => s.classList.toggle('is-on', k === i));
+  }
+  function nextBootSlide() {
+    if (bootDone) return;
+    bootIdx = (bootIdx + 1) % Math.max(1, bootSlides.length);
+    showBootSlide(bootIdx);
+    bootTimer = setTimeout(nextBootSlide, BOOT_DURS[bootIdx]);
+  }
+  if (bootSlides.length) {
+    showBootSlide(0);
+    bootTimer = setTimeout(nextBootSlide, BOOT_DURS[0]);
+  }
+
+  const bootTick = setInterval(() => {
+    if (bootDone) return;
+    bootProgress = Math.min(90, bootProgress + Math.max(0.35, (90 - bootProgress) * 0.022));
+    if (bootFill) bootFill.style.width = bootProgress.toFixed(1) + '%';
+    if (bootPct) bootPct.textContent = Math.floor(bootProgress) + '%';
+    if (bootTip && mmdDone.n > 0) bootTip.textContent = '正在载入 3D 模型 ' + mmdDone.n + ' / ' + mmdDone.total;
+  }, 180);
+
+  function finishBoot() {
+    if (bootDone) return;
+    bootDone = true;
+    clearTimeout(bootTimer);
+    clearInterval(bootTick);
+    bootProgress = 100;
+    if (bootFill) bootFill.style.width = '100%';
+    if (bootPct) bootPct.textContent = '100%';
+    if (bootTip) bootTip.textContent = '加载完成';
+    setTimeout(() => {
+      if (bootEl) bootEl.classList.add('is-hidden');
       ui.startBtn.disabled = false;
       ui.startBtn.textContent = '进入提瓦特';
-    }
-  }, 95);
+    }, 420);
+  }
+
+  ui.startBtn.textContent = '正在载入角色模型…';
 
   ui.startBtn.addEventListener('click', () => {
     if (ui.startBtn.disabled) return;
