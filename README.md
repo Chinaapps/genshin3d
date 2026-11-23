@@ -26,7 +26,7 @@ genshin3d/
 
 ## 运行
 
-线上：`https://chinaapps.github.io/genshin3d/`
+线上：`https://chinaapps.github.io/znys/`
 本地必须用 HTTP 打开（ES Module 不支持 `file://`）：
 
 ```bash

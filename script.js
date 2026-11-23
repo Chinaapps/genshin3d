@@ -526,7 +526,8 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
   function accentColor() { return ELEMENTS[PARTY[state.active].element]; }
 
   /* ---------- MMD 模型（PMX 本地加载：冰之女皇 / 雷泽 / verity） ---------- */
-  const MMD_YAW_FIX = Math.PI;      // MMD 模型本地朝向 -Z，游戏角色朝向 +Z
+  // PMX 模型本地正面朝 +Z，与游戏 heading=0（+Z）同向，无需额外旋转
+  const MMD_YAW_FIX = 0;
   const mmdLoader = new MMDLoader();
   const MMD_PATHS = {
     anastasya: './resources/models/anastasya/anastasya.pmx',
@@ -626,15 +627,18 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
       set('右ひざ', 'x', Math.max(0, sw) * 0.72 * amp);
       set('左腕', 'x', -sw * 0.42 * amp);
       set('右腕', 'x', sw * 0.34 * amp);
-      set('左肩', 'z', sw * 0.05 * amp);
-      set('右肩', 'z', -sw * 0.05 * amp);
     } else {
       const idle = Math.sin(t * 1.8) * 0.035;
       set('左足', 'x', 0); set('右足', 'x', 0);
       set('左ひざ', 'x', 0.02); set('右ひざ', 'x', 0.02);
       set('左腕', 'x', idle); set('右腕', 'x', -idle);
-      set('左肩', 'z', 0); set('右肩', 'z', 0);
     }
+
+    // MMD 默认是 T-pose，肩部绕 Z 收拢让手臂自然下垂（左负右正）
+    const armDown = 0.62;
+    const armSway = moving ? sw * 0.05 * amp : 0;
+    set('左肩', 'z', -armDown - armSway);
+    set('右肩', 'z', armDown + armSway);
 
     set('上半身', 'x', 0.045 * amp + Math.sin(t * 1.6) * 0.012);
     set('上半身', 'z', moving ? sw * 0.05 * amp : 0);
@@ -1256,7 +1260,7 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
     player.swingT = 1;
     state.shake = Math.max(state.shake, 0.25);
     const origin = player.pos.clone();
-    const hits = damageEnemies(origin, CFG.attackRange, true, 46, '');
+    const hits = damageEnemies(origin, CFG.attackRange, true, 92, '');
     if (hits > 0) {
       state.energy = Math.min(CFG.energyMax, state.energy + CFG.energyPerHit);
       const tip = player.pos.clone().add(forwardVec().multiplyScalar(1.5)).add(new THREE.Vector3(0, 1.4, 0));
@@ -1277,7 +1281,7 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
     spawnPillar(c, el.color);
     spawnParticles(c.clone().add(new THREE.Vector3(0, 0.6, 0)), el.color, 46, 5.2, { up: 1.5, grav: 1.2 });
 
-    const hits = damageEnemies(c, 5.6, false, 128, '');
+    const hits = damageEnemies(c, 5.6, false, 200, '');
     if (hits === 0) spawnParticles(c.clone().add(new THREE.Vector3(0, 1, 0)), el.color, 12, 2.4);
     toast(`元素战技 · ${el.name}`);
   }
@@ -1300,7 +1304,7 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
     spawnPillar(c, el.glow);
     spawnParticles(c.clone().add(new THREE.Vector3(0, 0.8, 0)), el.glow, 130, 8.5, { up: 1.2, grav: 1.6, life: 1.25 });
 
-    damageEnemies(c, 9.2, false, 320, 'crit');
+    damageEnemies(c, 9.2, false, 480, 'crit');
     toast(`元素爆发 · ${el.name}`, 2000);
   }
 
