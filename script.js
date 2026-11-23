@@ -923,7 +923,7 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
     const mesh = new THREE.Mesh(
       new THREE.CylinderGeometry(1.6, 1.6, 6, 24, 1, true),
       new THREE.MeshBasicMaterial({
-        color: colorHex, transparent: true, opacity: 0.65,
+        color: colorHex, transparent: true, opacity: 0.42,
         side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false,
       })
     );
@@ -1301,7 +1301,7 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
     spawnRing(c, el.color, 9.2, 1.0);
     spawnRing(c, el.glow, 6.4, 0.75, 0.85);
     spawnRing(c, el.color, 3.6, 0.5);
-    spawnPillar(c, el.glow);
+    spawnPillar(c, el.color);
     spawnParticles(c.clone().add(new THREE.Vector3(0, 0.8, 0)), el.glow, 130, 8.5, { up: 1.2, grav: 1.6, life: 1.25 });
 
     damageEnemies(c, 9.2, false, 480, 'crit');
