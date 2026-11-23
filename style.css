@@ -1,5 +1,6 @@
 /* ==========================================================================
    提瓦特 · 3D 探索框架  |  style.css
+   v0.5 Beta
    HUD 布局：左侧队伍 / 左下摇杆 / 右下动作键（无顶部功能栏）
    ========================================================================== */
 
@@ -14,7 +15,15 @@
   --panel: rgba(26, 32, 31, 0.42);
   --panel-line: rgba(255, 255, 255, 0.18);
   --shadow-hard: 0 10px 26px rgba(12, 20, 20, 0.42);
-  --font: "HarmonyOS Sans SC", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font: "Genshin CN", "HarmonyOS Sans SC", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
+}
+
+@font-face {
+  font-family: "Genshin CN";
+  src: url("./resources/fonts/zh-cn.ttf") format("truetype");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -193,8 +202,7 @@ html, body {
 .joystick.is-active .joy-knob { box-shadow: 0 7px 18px rgba(0, 0, 0, .45), 0 0 16px rgba(201, 168, 106, .55), inset 0 1px 3px #fff; }
 
 .joy-label {
-  position: absolute; left: 50%; bottom: -20px; transform: translateX(-50%);
-  font-size: 11px; letter-spacing: 3px; color: rgba(255, 255, 255, .58); white-space: nowrap;
+  display: none;   /* 左下角留给版本标签 */
 }
 
 /* ==========================================================================
@@ -566,4 +574,34 @@ html, body {
 
 @media (hover: none) {
   .act-name { color: rgba(255, 252, 240, .7); }
+}
+
+
+/* ==========================================================================
+   版本标签（左下角）
+   ========================================================================== */
+.ver-tag {
+  position: absolute;
+  left: 14px; bottom: 8px;
+  z-index: 12;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px 4px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  letter-spacing: 1.2px;
+  color: rgba(247, 241, 226, .78);
+  background: rgba(20, 30, 28, .34);
+  border: 1px solid rgba(255, 255, 255, .13);
+  backdrop-filter: blur(3px);
+  pointer-events: none;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, .55);
+}
+.ver-tag i {
+  width: 5px; height: 5px; border-radius: 50%;
+  background: currentColor; opacity: .8;
+}
+.ver-tag b { font-weight: 600; color: #ffe9bd; }
+
+@media (max-width: 760px) {
+  .ver-tag { left: 10px; bottom: 6px; font-size: 10px; padding: 3px 8px; }
 }

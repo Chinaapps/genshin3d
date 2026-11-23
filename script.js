@@ -109,12 +109,13 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
 
   const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 320);
   camera.position.set(0, 12, 24);
+  const cameraRay = new THREE.Raycaster();
 
   /* ---------- 天空穹顶 ---------- */
   const skyMat = new THREE.ShaderMaterial({
     uniforms: {
-      topColor: { value: new THREE.Color(0x86c6e8) },
-      midColor: { value: new THREE.Color(0xd2e9e2) },
+      topColor: { value: new THREE.Color(0x7db4de) },
+      midColor: { value: new THREE.Color(0xd6e9e6) },
       botColor: { value: new THREE.Color(0xf5eed9) },
     },
     vertexShader: `
@@ -169,6 +170,45 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
   const world = new THREE.Group();
   scene.add(world);
 
+  // 相机射线只检测这些「会挡人」的实体（树 / 石 / 柱），命中就把相机拉近
+  const occluders = [];
+
+  /* ---------- 程序化草地细节纹理（只做明暗斑纹，主色仍由顶点色决定） ---------- */
+  function makeGrassTexture() {
+    const size = 256;
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = size;
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = '#f2f2ee';
+    ctx.fillRect(0, 0, size, size);
+    // 大块明暗
+    for (let i = 0; i < 26; i++) {
+      const x = rng() * size, y = rng() * size, r = 14 + rng() * 46;
+      const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+      const dark = rng() > 0.55;
+      g.addColorStop(0, dark ? 'rgba(190,196,176,.75)' : 'rgba(255,255,250,.72)');
+      g.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+    }
+    // 细草线
+    for (let i = 0; i < 900; i++) {
+      const x = rng() * size, y = rng() * size;
+      ctx.strokeStyle = rng() > 0.5 ? 'rgba(206,214,186,.55)' : 'rgba(255,255,244,.45)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + (rng() - 0.5) * 3, y - 2 - rng() * 5);
+      ctx.stroke();
+    }
+    const tex = new THREE.CanvasTexture(cv);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(30, 30);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+    return tex;
+  }
+
   /* ---------- 地面 ---------- */
   (function buildTerrain() {
     const seg = 128, size = 180;
@@ -178,8 +218,8 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
     const pos = geo.attributes.position;
     const colors = new Float32Array(pos.count * 3);
     const cLow = new THREE.Color(0x5f8b3c);
-    const cMid = new THREE.Color(0x93b858);
-    const cHigh = new THREE.Color(0xb9c47c);
+    const cMid = new THREE.Color(0x8cab5e);
+    const cHigh = new THREE.Color(0xb4bf7c);
     const cStone = new THREE.Color(0xb6b4a4);
     const tmp = new THREE.Color();
 
@@ -189,10 +229,15 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
       pos.setY(i, h);
 
       const flat = 1 - smoothstep(9, 20, Math.hypot(x, z)); // 出生地
+      // 出生点 → 拱门的小径（自然蜿蜒）
+      const pathX = Math.sin(z * 0.18) * 1.5;
+      const pathD = Math.abs(x - pathX);
+      const onPath = z < 4 && z > -30 ? Math.max(0, 1 - pathD / 1.9) : 0;
       tmp.copy(cLow).lerp(cMid, smoothstep(-1.0, 3.2, h));
       tmp.lerp(cHigh, smoothstep(2.8, 5.5, h) * 0.6);
       tmp.lerp(cStone, smoothstep(4.4, 6.2, h) * 0.55);
       if (flat > 0.5) tmp.lerp(new THREE.Color(0xa8bd6a), 0.18);
+      if (onPath > 0) tmp.lerp(new THREE.Color(0xbb9d70), onPath * 0.55);
       const n = (rng() - 0.5) * 0.035;
       colors[i * 3] = clamp(tmp.r + n, 0, 1);
       colors[i * 3 + 1] = clamp(tmp.g + n, 0, 1);
@@ -202,43 +247,76 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
     geo.computeVertexNormals();
 
     const mat = new THREE.MeshStandardMaterial({
-      vertexColors: true, roughness: 0.97, metalness: 0, flatShading: true,
+      vertexColors: true, roughness: 0.95, metalness: 0,
+      map: makeGrassTexture(),
     });
     const ground = new THREE.Mesh(geo, mat);
     ground.receiveShadow = true;
     world.add(ground);
   })();
 
+  /* ---------- 空气光尘（氛围） ---------- */
+  (function buildMotes() {
+    const N = 280;
+    const pos = new Float32Array(N * 3);
+    for (let i = 0; i < N; i++) {
+      const a = rng() * Math.PI * 2;
+      const r = 6 + Math.pow(rng(), 0.7) * 34;
+      const x = Math.cos(a) * r, z = Math.sin(a) * r;
+      pos[i * 3] = x;
+      pos[i * 3 + 1] = groundHeight(x, z) + 0.5 + rng() * 6.5;
+      pos[i * 3 + 2] = z;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    const mat = new THREE.PointsMaterial({
+      color: 0xfff6d8, size: 0.11, transparent: true, opacity: 0.7,
+      depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true,
+    });
+    const pts = new THREE.Points(geo, mat);
+    pts.frustumCulled = false;
+    world.add(pts);
+  })();
+
   /* ---------- 树 / 石头 ---------- */
   const matTrunk = new THREE.MeshStandardMaterial({ color: 0x7a5b3c, roughness: 0.95, flatShading: true });
   const matLeafA = new THREE.MeshStandardMaterial({ color: 0x4f8a4a, roughness: 0.9, flatShading: true });
   const matLeafB = new THREE.MeshStandardMaterial({ color: 0x6ba559, roughness: 0.9, flatShading: true });
+  const matLeafC = new THREE.MeshStandardMaterial({ color: 0x3f7b44, roughness: 0.9, flatShading: true });
+  const matMoss = new THREE.MeshStandardMaterial({ color: 0x5f8547, roughness: 0.95, flatShading: true });
   const matRock = new THREE.MeshStandardMaterial({ color: 0x9a9c93, roughness: 0.95, flatShading: true });
+  const matRockDark = new THREE.MeshStandardMaterial({ color: 0x8d9187, roughness: 0.95, flatShading: true });
 
   const geoTrunk = new THREE.CylinderGeometry(0.16, 0.26, 1.7, 6);
   const geoLeaf1 = new THREE.ConeGeometry(1.15, 2.2, 7);
   const geoLeaf2 = new THREE.ConeGeometry(0.9, 1.8, 7);
   const geoLeaf3 = new THREE.ConeGeometry(0.62, 1.3, 7);
-  const geoRock = new THREE.IcosahedronGeometry(1, 0);
+  const geoRock = new THREE.IcosahedronGeometry(1, 1);
 
+  const LEAF_MATS = [matLeafA, matLeafB, matLeafC];
   function spawnTree(x, z, s) {
     const g = new THREE.Group();
     const trunk = new THREE.Mesh(geoTrunk, matTrunk);
     trunk.position.y = 0.85;
-    const l1 = new THREE.Mesh(geoLeaf1, matLeafA); l1.position.y = 2.3;
-    const l2 = new THREE.Mesh(geoLeaf2, matLeafB); l2.position.y = 3.3;
-    const l3 = new THREE.Mesh(geoLeaf3, matLeafA); l3.position.y = 4.1;
-    g.add(trunk, l1, l2, l3);
-    g.traverse((m) => { if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } });
+    const leafA = LEAF_MATS[Math.floor(rng() * LEAF_MATS.length)];
+    const leafB = LEAF_MATS[Math.floor(rng() * LEAF_MATS.length)];
+    const l1 = new THREE.Mesh(geoLeaf1, leafA); l1.position.y = 2.3;
+    const l2 = new THREE.Mesh(geoLeaf2, leafB); l2.position.y = 3.3;
+    const l3 = new THREE.Mesh(geoLeaf3, leafA); l3.position.y = 4.05;
+    const l4 = new THREE.Mesh(geoLeaf3, leafB);
+    l4.scale.setScalar(0.62); l4.position.y = 4.72;
+    l1.rotation.y = rng() * 3; l2.rotation.y = rng() * 3; l3.rotation.y = rng() * 3;
+    g.add(trunk, l1, l2, l3, l4);
+    g.traverse((m) => { if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; occluders.push(m); } });
     g.position.set(x, groundHeight(x, z) - 0.1, z);
     g.scale.setScalar(s);
     g.rotation.y = rng() * Math.PI * 2;
     world.add(g);
   }
 
-  for (let i = 0; i < 52; i++) {
+  for (let i = 0; i < 64; i++) {
     const a = rng() * Math.PI * 2;
-    const r = 12 + Math.pow(rng(), 0.7) * 62;
+    const r = 11 + Math.pow(rng(), 0.7) * 63;
     spawnTree(Math.cos(a) * r, Math.sin(a) * r, 0.85 + rng() * 0.95);
   }
 
@@ -246,14 +324,193 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
     const a = rng() * Math.PI * 2;
     const r = 9 + rng() * 66;
     const x = Math.cos(a) * r, z = Math.sin(a) * r;
-    const rock = new THREE.Mesh(geoRock, matRock);
+    const rock = new THREE.Mesh(geoRock, rng() > 0.45 ? matRock : matRockDark);
     const s = 0.5 + rng() * 1.6;
     rock.scale.set(s * rand(0.8, 1.4), s * rand(0.6, 1.1), s * rand(0.8, 1.4));
     rock.position.set(x, groundHeight(x, z) - 0.15, z);
     rock.rotation.set(rng() * 3, rng() * 3, rng() * 3);
     rock.castShadow = true; rock.receiveShadow = true;
     world.add(rock);
+    occluders.push(rock);
+    // 部分石头顶上长苔
+    if (rng() > 0.55) {
+      const moss = new THREE.Mesh(
+        new THREE.SphereGeometry(1, 7, 4, 0, Math.PI * 2, 0, Math.PI * 0.5), matMoss
+      );
+      moss.scale.set(s * 0.62, s * 0.17, s * 0.62);
+      moss.position.set(x, groundHeight(x, z) - 0.15 + s * 0.78, z);
+      moss.receiveShadow = true;
+      world.add(moss);
+    }
   }
+
+  /* ---------- 草簇（实例化，几百丛不会掉帧） ---------- */
+  (function buildGrassTufts() {
+    const count = 620;
+    const geo = new THREE.ConeGeometry(0.13, 0.68, 4, 1, true);
+    geo.translate(0, 0.34, 0);
+    const mat = new THREE.MeshStandardMaterial({
+      color: 0xffffff, roughness: 0.95, side: THREE.DoubleSide, flatShading: true,
+    });
+    const mesh = new THREE.InstancedMesh(geo, mat, count);
+    const dummy = new THREE.Object3D();
+    const col = new THREE.Color();
+    let cx = 0, cz = 0;
+    for (let i = 0; i < count; i++) {
+      if (i % 4 === 0) {   // 每 4 丛聚成一小簇
+        const a = rng() * Math.PI * 2;
+        const r = 7.5 + Math.pow(rng(), 0.62) * 52;
+        cx = Math.cos(a) * r; cz = Math.sin(a) * r;
+      }
+      const x = cx + rand(-1.5, 1.5), z = cz + rand(-1.5, 1.5);
+      dummy.position.set(x, groundHeight(x, z) - 0.02, z);
+      dummy.rotation.set(rand(-0.14, 0.14), rng() * Math.PI * 2, rand(-0.14, 0.14));
+      dummy.scale.set(rand(0.7, 1.5), rand(0.7, 1.6), rand(0.7, 1.5));
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+      col.setHSL(0.235 + rng() * 0.075, 0.42 + rng() * 0.22, 0.33 + rng() * 0.17);
+      mesh.setColorAt(i, col);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    mesh.frustumCulled = false;
+    mesh.receiveShadow = true;
+    world.add(mesh);
+  })();
+
+  /* ---------- 小花点缀 ---------- */
+  (function buildFlowers() {
+    const count = 150;
+    const geo = new THREE.IcosahedronGeometry(0.085, 0);
+    const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8, flatShading: true });
+    const mesh = new THREE.InstancedMesh(geo, mat, count);
+    const dummy = new THREE.Object3D();
+    const col = new THREE.Color();
+    const palette = [0xfff4d6, 0xffe28f, 0xffc0d0, 0xd6ecff, 0xf6f0ff];
+    for (let i = 0; i < count; i++) {
+      const a = rng() * Math.PI * 2;
+      const r = 9 + Math.pow(rng(), 0.7) * 62;
+      const x = Math.cos(a) * r, z = Math.sin(a) * r;
+      dummy.position.set(x, groundHeight(x, z) + 0.16 + rng() * 0.12, z);
+      dummy.scale.setScalar(rand(0.7, 1.5));
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+      col.setHex(palette[Math.floor(rng() * palette.length)]);
+      mesh.setColorAt(i, col);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    mesh.frustumCulled = false;
+    world.add(mesh);
+  })();
+
+  /* ---------- 远景树带（只做剪影，不投影，撑出纵深） ---------- */
+  (function buildFarTrees() {
+    const matFarTree = new THREE.MeshStandardMaterial({ color: 0x6f8d63, roughness: 1, flatShading: true });
+    const geoFar = new THREE.ConeGeometry(1, 3.2, 5);
+    const geoFar2 = new THREE.ConeGeometry(0.62, 2.2, 5);
+    for (let i = 0; i < 90; i++) {
+      const a = rng() * Math.PI * 2;
+      const r = 72 + rng() * 16;
+      const x = Math.cos(a) * r, z = Math.sin(a) * r;
+      const g = new THREE.Group();
+      const l1 = new THREE.Mesh(geoFar, matFarTree); l1.position.y = 2.2;
+      const l2 = new THREE.Mesh(geoFar2, matFarTree); l2.position.y = 3.7;
+      g.add(l1, l2);
+      g.position.set(x, groundHeight(x, z) - 0.35, z);
+      g.scale.setScalar(1.1 + rng() * 1.4);
+      g.rotation.y = rng() * 3;
+      world.add(g);
+    }
+  })();
+
+  /* ---------- 低模云团 ---------- */
+  (function buildClouds() {
+    const geoCloud = new THREE.IcosahedronGeometry(1, 1);
+    const matCloud = new THREE.MeshStandardMaterial({
+      color: 0xffffff, roughness: 1, flatShading: true, transparent: true, opacity: 0.93,
+    });
+    for (let i = 0; i < 10; i++) {
+      const g = new THREE.Group();
+      const puffs = 4 + Math.floor(rng() * 4);
+      for (let p = 0; p < puffs; p++) {
+        const puff = new THREE.Mesh(geoCloud, matCloud);
+        puff.position.set(rand(-5, 5), rand(-0.6, 1.0), rand(-3, 3));
+        puff.scale.set(rand(1.3, 2.5), rand(0.7, 1.25), rand(1.2, 2.2));
+        puff.rotation.set(rng() * 3, rng() * 3, rng() * 3);
+        g.add(puff);
+      }
+      const a = rng() * Math.PI * 2, r = 46 + rng() * 40;
+      g.position.set(Math.cos(a) * r, 9 + rng() * 13, Math.sin(a) * r);
+      g.scale.setScalar(2.4 + rng() * 2.6);
+      world.add(g);
+    }
+  })();
+
+  /* ---------- 程序化石砖纹理 ---------- */
+  function makeStoneTexture() {
+    const size = 128;
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = size;
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = '#8f8672';
+    ctx.fillRect(0, 0, size, size);
+    const bw = 32, bh = 16;
+    for (let row = 0; row < size / bh; row++) {
+      const offset = (row % 2) * (bw / 2);
+      for (let col = -1; col < size / bw + 1; col++) {
+        const x = col * bw + offset, y = row * bh;
+        const shade = 186 + Math.floor(rng() * 26);
+        ctx.fillStyle = `rgb(${shade},${shade - 5},${shade - 20})`;
+        ctx.fillRect(x + 1, y + 1, bw - 2, bh - 2);
+      }
+    }
+    // 噪点
+    for (let i = 0; i < 500; i++) {
+      ctx.fillStyle = `rgba(120,110,92,${0.05 + rng() * 0.07})`;
+      ctx.fillRect(rng() * size, rng() * size, 1, 1);
+    }
+    const tex = new THREE.CanvasTexture(cv);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(7, 7);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  }
+
+  /* ---------- 出生点石砖广场 ---------- */
+  (function buildPlaza() {
+    const y = PLATEAU + 0.02;
+    const stoneTex = makeStoneTexture();
+    const matPlaza = new THREE.MeshStandardMaterial({ color: 0xffffff, map: stoneTex, roughness: 0.9 });
+    const matPlazaInner = new THREE.MeshStandardMaterial({ color: 0xffffff, map: stoneTex, roughness: 0.88 });
+    const disc = new THREE.Mesh(new THREE.CircleGeometry(5.1, 36), matPlaza);
+    disc.rotation.x = -Math.PI / 2;
+    disc.position.y = y;
+    disc.receiveShadow = true;
+    world.add(disc);
+
+    const inner = new THREE.Mesh(new THREE.CircleGeometry(2.9, 28), matPlazaInner);
+    inner.rotation.x = -Math.PI / 2;
+    inner.position.y = y + 0.012;
+    inner.receiveShadow = true;
+    world.add(inner);
+
+    // 中心纹样：八瓣菱形
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      const petal = new THREE.Mesh(new THREE.PlaneGeometry(0.55, 1.5), matPlaza);
+      petal.rotation.x = -Math.PI / 2;
+      petal.rotation.z = a;
+      petal.position.set(Math.cos(a) * 1.05, y + 0.02, Math.sin(a) * 1.05);
+      world.add(petal);
+    }
+    // 外环石带
+    const ring = new THREE.Mesh(new THREE.RingGeometry(5.1, 5.6, 36), matPlaza);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = y + 0.004;
+    ring.receiveShadow = true;
+    world.add(ring);
+  })();
 
   /* ---------- 遗迹石柱 + 拱门（远景地标） ---------- */
   const matStone = new THREE.MeshStandardMaterial({ color: 0xcdc6b0, roughness: 0.85, flatShading: true });
@@ -270,6 +527,7 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
       pillar.rotation.y = rng();
       pillar.castShadow = true; pillar.receiveShadow = true;
       world.add(pillar);
+      occluders.push(pillar);
       if (rng() > 0.5) {
         const cap = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.28, 1.6), matStoneDark);
         cap.position.set(x, groundHeight(x, z) + h - 0.2, z);
@@ -288,6 +546,7 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
       leg.position.set(ax + off, baseY + 3.0, az);
       leg.castShadow = true; leg.receiveShadow = true;
       world.add(leg);
+      occluders.push(leg);
     });
     const lintel = new THREE.Mesh(new THREE.BoxGeometry(7.4, 0.85, 1.4), matStoneDark);
     lintel.position.set(ax, baseY + 6.5, az);
@@ -303,14 +562,34 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
 
   /* ---------- 远山 ---------- */
   (function buildMountains() {
-    const mat = new THREE.MeshStandardMaterial({ color: 0x8fa9a1, roughness: 1, flatShading: true });
-    for (let i = 0; i < 14; i++) {
-      const a = (i / 14) * Math.PI * 2 + rng() * 0.3;
-      const r = 92 + rng() * 34;
-      const h = 16 + rng() * 26;
-      const cone = new THREE.Mesh(new THREE.ConeGeometry(9 + rng() * 9, h, 6), mat);
-      cone.position.set(Math.cos(a) * r, -4 + h / 2, Math.sin(a) * r);
+    const matNear = new THREE.MeshStandardMaterial({ color: 0x8ea79b, roughness: 1, flatShading: true });
+    const matFar = new THREE.MeshStandardMaterial({ color: 0xaebbaf, roughness: 1, flatShading: true });
+    // 近层：成组的双锥山脊，宽窄不一
+    for (let i = 0; i < 18; i++) {
+      const a = (i / 18) * Math.PI * 2 + rng() * 0.28;
+      const r = 86 + rng() * 26;
+      const h = 11 + rng() * 16;
+      const g = new THREE.Group();
+      const main = new THREE.Mesh(new THREE.ConeGeometry(7 + rng() * 7, h, 5), matNear);
+      main.position.y = h / 2 - 3;
+      main.rotation.y = rng() * 3;
+      main.scale.set(rand(0.9, 1.35), 1, rand(0.8, 1.2));
+      const side = new THREE.Mesh(new THREE.ConeGeometry(5 + rng() * 5, h * rand(0.55, 0.8), 5), matNear);
+      side.position.set(rand(-7, 7), side.geometry.parameters.height / 2 - 2.2, rand(-6, 6));
+      side.rotation.y = rng() * 3;
+      g.add(main, side);
+      g.position.set(Math.cos(a) * r, 0, Math.sin(a) * r);
+      world.add(g);
+    }
+    // 远层：更淡的剪影，被雾接住
+    for (let i = 0; i < 16; i++) {
+      const a = (i / 16) * Math.PI * 2 + rng() * 0.2;
+      const r = 128 + rng() * 24;
+      const h = 26 + rng() * 32;
+      const cone = new THREE.Mesh(new THREE.ConeGeometry(12 + rng() * 10, h, 5), matFar);
+      cone.position.set(Math.cos(a) * r, h / 2 - 6, Math.sin(a) * r);
       cone.rotation.y = rng() * 3;
+      cone.scale.set(rand(1.0, 1.5), 1, rand(0.9, 1.3));
       world.add(cone);
     }
   })();
@@ -320,7 +599,7 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
   (function buildFloatingIslands() {
     for (let i = 0; i < 4; i++) {
       const a = 0.9 + i * 1.35 + rng() * 0.4;
-      const r = 34 + rng() * 22;
+      const r = 52 + rng() * 24;
       const g = new THREE.Group();
       const rockMat = new THREE.MeshStandardMaterial({ color: 0x8b8578, roughness: 1, flatShading: true });
       const grassMat = new THREE.MeshStandardMaterial({ color: 0x79a253, roughness: 1, flatShading: true });
@@ -343,7 +622,7 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
         g.add(tree);
       }
       g.traverse((m) => { if (m.isMesh) m.castShadow = true; });
-      g.position.set(Math.cos(a) * r, 13 + rng() * 9, Math.sin(a) * r);
+      g.position.set(Math.cos(a) * r, 24 + rng() * 10, Math.sin(a) * r);
       g.userData.baseY = g.position.y;
       g.userData.phase = rng() * Math.PI * 2;
       world.add(g);
@@ -1629,23 +1908,63 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
       Math.cos(state.camYaw) * Math.cos(state.camPitch)
     ).multiplyScalar(state.camDist);
 
-    const wantPos = player.pos.clone().add(off).add(new THREE.Vector3(0, 1.55, 0));
+    // 视线目标抬到胸口以上，坡地也不会只剩下半身
+    // 注意：player.pos.y 始终是 0，真实高度要读 root（地形高度 + 跳跃高度）
+    const lookY = 1.34;
+    const pivot = new THREE.Vector3(player.pos.x, player.root.position.y + lookY, player.pos.z);
+
+    // 沿「角色 → 相机」方向采样地形，被坡挡住时把相机收紧、抬高，直到视线通畅
+    let camOff = off.clone();
+
+    // 树 / 石 / 柱挡在相机和角色之间时，把相机沿视线拉近，避免被树冠糊住
+    const rayDir = camOff.clone();
+    const camLen = rayDir.length();
+    rayDir.normalize();
+    cameraRay.set(pivot, rayDir);
+    cameraRay.far = camLen;
+    const blockedHits = cameraRay.intersectObjects(occluders, false);
+    if (blockedHits.length && blockedHits[0].distance < camLen - 0.25) {
+      const d = Math.max(2.2, blockedHits[0].distance - 0.6);
+      camOff.multiplyScalar(d / camLen);
+    }
+
+    let wantPos = pivot.clone().add(camOff);
+    for (let s = 0; s < 9; s++) {
+      const testPos = pivot.clone().add(camOff);
+      const camGround = groundHeight(testPos.x, testPos.z) + 1.85;
+      if (testPos.y < camGround) testPos.y = camGround;
+      let blocked = false;
+      for (let i = 1; i <= 5; i++) {
+        const k = i / 6;
+        const sx = pivot.x + (testPos.x - pivot.x) * k;
+        const sz = pivot.z + (testPos.z - pivot.z) * k;
+        const sy = pivot.y + (testPos.y - pivot.y) * k;
+        if (sy < groundHeight(sx, sz) + 0.55) { blocked = true; break; }
+      }
+      wantPos = testPos;
+      if (!blocked) break;
+      // 收近 + 抬高，绕开坡体
+      camOff.multiplyScalar(0.82);
+      camOff.y += 1.1 + s * 0.22;
+    }
+    // 最终保险：不陷进地面
+    const finalGround = groundHeight(wantPos.x, wantPos.z) + 1.55;
+    if (wantPos.y < finalGround) wantPos.y = finalGround;
+
     const shakeAmp = state.shake * 0.22;
     wantPos.x += rand(-1, 1) * shakeAmp;
     wantPos.z += rand(-1, 1) * shakeAmp;
 
-    const groundAtCam = groundHeight(wantPos.x, wantPos.z) + 1.2;
-    if (wantPos.y < groundAtCam) wantPos.y = groundAtCam;
-
     camPos.lerp(wantPos, 1 - Math.exp(-7.5 * dt));
     camera.position.copy(camPos);
 
-    const wantLook = player.pos.clone().add(new THREE.Vector3(0, 1.15, 0));
+    // 地形抬升时测量相机是否被地面顶起，视线目标再上抬一点补偿
+    const camGroundNow = groundHeight(camera.position.x, camera.position.z) + 1.2;
+    if (camera.position.y < camGroundNow) camera.position.y = camGroundNow;
+
+    const wantLook = new THREE.Vector3(player.pos.x, player.root.position.y + lookY, player.pos.z);
     state.lookAt.lerp(wantLook, 1 - Math.exp(-9 * dt));
     camera.lookAt(state.lookAt);
-    // 相机贴近地形检查
-    const camGround = groundHeight(camera.position.x, camera.position.z) + 1.0;
-    if (camera.position.y < camGround) camera.position.y = camGround;
 
     /* ---------- 阳光跟随 ---------- */
     sun.position.set(player.pos.x + 26, player.pos.y + 34, player.pos.z + 16);
@@ -1823,5 +2142,5 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
     camera.lookAt(state.lookAt);
   })();
 
-  window.__TEYVAT_DEBUG = { scene, world, enemies, state, mmdPlayers, mmdVerity, player, camera, renderer, THREE };
+  window.__TEYVAT_DEBUG = { scene, world, enemies, state, mmdPlayers, mmdVerity, player, camera, renderer, THREE, occluders, cameraRay, groundHeight };
 })();
