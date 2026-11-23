@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#10161a">
+<title>提瓦特 · 3D 探索框架</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <!-- ===================== 3D 舞台 ===================== -->
+  <div id="stage"></div>
+  <div class="vignette"></div>
+
+  <!-- ===================== HUD ===================== -->
+  <div id="hud">
+
+    <!-- 左侧：队伍列表 -->
+    <div class="party" id="party">
+      <div class="party-card is-active" data-index="0" style="--elem:#6fc9bd">
+        <span class="party-key">1</span>
+        <div class="party-avatar"><span class="avatar-initial">荧</span><i class="party-elem">风</i></div>
+        <div class="party-info">
+          <span class="party-name">荧</span>
+          <div class="hp"><i class="hp-fill"></i></div>
+        </div>
+      </div>
+      <div class="party-card" data-index="1" style="--elem:#e8b34a">
+        <span class="party-key">2</span>
+        <div class="party-avatar"><span class="avatar-initial">钟</span><i class="party-elem">岩</i></div>
+        <div class="party-info">
+          <span class="party-name">钟离</span>
+          <div class="hp"><i class="hp-fill"></i></div>
+        </div>
+      </div>
+      <div class="party-card" data-index="2" style="--elem:#b488e0">
+        <span class="party-key">3</span>
+        <div class="party-avatar"><span class="avatar-initial">雷</span><i class="party-elem">雷</i></div>
+        <div class="party-info">
+          <span class="party-name">雷电将军</span>
+          <div class="hp"><i class="hp-fill"></i></div>
+        </div>
+      </div>
+      <div class="party-card" data-index="3" style="--elem:#8fd6ee">
+        <span class="party-key">4</span>
+        <div class="party-avatar"><span class="avatar-initial">甘</span><i class="party-elem">冰</i></div>
+        <div class="party-info">
+          <span class="party-name">甘雨</span>
+          <div class="hp"><i class="hp-fill"></i></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 左下：虚拟摇杆 -->
+    <div class="joystick" id="joystick">
+      <div class="joy-ticks">
+        <i class="tick t-n"></i><i class="tick t-e"></i><i class="tick t-s"></i><i class="tick t-w"></i>
+      </div>
+      <div class="joy-ring"></div>
+      <div class="joy-knob" id="joy-knob"><span class="joy-core"></span></div>
+      <div class="joy-label">移动</div>
+    </div>
+
+    <!-- 右下：动作按键 -->
+    <div class="cluster">
+      <button class="act act--jump" id="btn-jump" aria-label="跳跃" title="跳跃">
+        <svg viewBox="0 0 48 48" class="ico" aria-hidden="true">
+          <path d="M24 8 L36 22 H28 V40 H20 V22 H12 Z" fill="currentColor"/>
+        </svg>
+      </button>
+
+      <button class="act act--sprint" id="btn-sprint" aria-label="冲刺" title="冲刺（长按/Shift）">
+        <svg viewBox="0 0 48 48" class="ico" aria-hidden="true">
+          <path d="M6 14 L20 24 L6 34 M22 14 L36 24 L22 34 M38 14 L46 24 L38 34" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="square"/>
+        </svg>
+      </button>
+
+      <button class="act act--skill" id="btn-skill" aria-label="元素战技" title="元素战技 E">
+        <span class="act-cd" id="skill-cd"></span>
+        <svg viewBox="0 0 48 48" class="ico" aria-hidden="true">
+          <path d="M24 4 L30 18 L44 24 L30 30 L24 44 L18 30 L4 24 L18 18 Z" fill="currentColor"/>
+        </svg>
+        <span class="act-key">E</span>
+      </button>
+
+      <button class="act act--burst" id="btn-burst" aria-label="元素爆发" title="元素爆发 Q">
+        <span class="act-energy" id="burst-energy"></span>
+        <svg viewBox="0 0 48 48" class="ico" aria-hidden="true">
+          <circle cx="24" cy="24" r="13" fill="none" stroke="currentColor" stroke-width="2.6"/>
+          <path d="M24 11 L27 21 L37 24 L27 27 L24 37 L21 27 L11 24 L21 21 Z" fill="currentColor"/>
+        </svg>
+        <span class="act-key">Q</span>
+      </button>
+
+      <button class="act act--attack" id="btn-attack" aria-label="普通攻击" title="普通攻击">
+        <span class="stam-ring" id="stam-ring"></span>
+        <svg viewBox="0 0 64 64" class="ico" aria-hidden="true">
+          <path d="M44 8 L56 20 L26 50 L14 38 Z" fill="currentColor"/>
+          <path d="M11 41 L23 53" fill="none" stroke="currentColor" stroke-width="4"/>
+          <path d="M9 53 L17 45 L21 49 L13 57 Z" fill="currentColor" opacity=".75"/>
+        </svg>
+      </button>
+    </div>
+
+    <!-- 浮动数字 / 提示 -->
+    <div class="floaters" id="floaters"></div>
+    <div class="toast" id="toast"></div>
+  </div>
+
+  <!-- ===================== 开始界面 ===================== -->
+  <div class="start" id="start">
+    <div class="start-inner">
+      <div class="start-mark">✦</div>
+      <h1>提瓦特 · 探索框架</h1>
+      <p class="start-sub">3D 场景 · 队伍切换 · 战斗与技能 HUD</p>
+      <div class="load"><i id="load-bar"></i></div>
+      <ul class="keys">
+        <li><b>WASD</b> 移动　<b>Shift</b> 冲刺　<b>空格</b> 跳跃</li>
+        <li><b>拖动画面</b> 转视角　<b>滚轮</b> 缩放</li>
+        <li><b>E</b> 元素战技　<b>Q</b> 元素爆发　<b>1–4</b> 切换角色</li>
+      </ul>
+      <button class="start-btn" id="start-btn" disabled>正在进入提瓦特…</button>
+      <p class="start-tip">建议使用 Chrome / Edge / Safari，手机请横屏体验</p>
+    </div>
+  </div>
+</div>
+
+<script src="resources/vendor/three.min.js"></script>
+<script src="script.js"></script>
+</body>
+</html>

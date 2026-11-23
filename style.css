@@ -1,0 +1,494 @@
+/* ==========================================================================
+   提瓦特 · 3D 探索框架  |  style.css
+   HUD 布局：左侧队伍 / 左下摇杆 / 右下动作键（无顶部功能栏）
+   ========================================================================== */
+
+:root {
+  --ink: #3a332a;
+  --ink-soft: #6b6153;
+  --cream: #f7f1e2;
+  --cream-deep: #e9dcc0;
+  --gold: #c9a86a;
+  --gold-deep: #9d7c3c;
+  --elem: #6fc9bd;
+  --panel: rgba(26, 32, 31, 0.42);
+  --panel-line: rgba(255, 255, 255, 0.18);
+  --shadow-hard: 0 10px 26px rgba(12, 20, 20, 0.42);
+  --font: "HarmonyOS Sans SC", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+html, body {
+  width: 100%; height: 100%; overflow: hidden;
+  background: #0d1414;
+  font-family: var(--font);
+  color: #fff;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+
+#app { position: fixed; inset: 0; overflow: hidden; }
+#stage { position: absolute; inset: 0; }
+#stage canvas { display: block; width: 100%; height: 100%; }
+
+/* 画面暗角，让 HUD 更突出 */
+.vignette {
+  position: absolute; inset: 0; pointer-events: none;
+  background:
+    radial-gradient(120% 90% at 50% 48%, rgba(0,0,0,0) 52%, rgba(8,14,14,.42) 100%),
+    linear-gradient(to bottom, rgba(8,14,14,.22), transparent 22%, transparent 78%, rgba(8,14,14,.30));
+  mix-blend-mode: multiply;
+  opacity: .9;
+}
+
+#hud { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
+#hud button, .joystick, .party-card { pointer-events: auto; }
+
+/* ==========================================================================
+   左侧队伍
+   ========================================================================== */
+.party {
+  position: absolute;
+  left: 16px; top: 50%;
+  transform: translateY(-50%);
+  display: flex; flex-direction: column; gap: 10px;
+  padding-left: 4px;
+}
+
+.party-card {
+  position: relative;
+  display: flex; align-items: center; gap: 9px;
+  width: 152px;
+  padding: 6px 16px 6px 6px;
+  border-radius: 40px 16px 16px 40px;
+  background: linear-gradient(100deg, rgba(20, 27, 26, .52), rgba(20, 27, 26, .20));
+  border: 1px solid rgba(255, 255, 255, .16);
+  backdrop-filter: blur(7px) saturate(130%);
+  -webkit-backdrop-filter: blur(7px) saturate(130%);
+  box-shadow: 0 6px 16px rgba(8, 14, 14, .28);
+  cursor: pointer;
+  transition: transform .22s cubic-bezier(.3, .9, .3, 1), background .25s, border-color .25s, opacity .25s;
+}
+.party-card:active { transform: scale(.97); }
+
+.party-card.is-active {
+  transform: translateX(10px);
+  width: 164px;
+  background: linear-gradient(100deg, rgba(247, 241, 226, .88), rgba(247, 241, 226, .46));
+  border-color: rgba(201, 168, 106, .9);
+  box-shadow: 0 8px 22px rgba(8, 14, 14, .38), 0 0 0 2px rgba(201, 168, 106, .16), 0 0 18px var(--elem);
+}
+.party-card:not(.is-active) { opacity: .82; }
+.party-card:not(.is-active):hover { opacity: 1; transform: translateX(4px); }
+
+.party-key {
+  position: absolute; left: 50%; top: -8px;
+  width: 17px; height: 17px; border-radius: 50%;
+  font-size: 10px; font-weight: 700; line-height: 17px; text-align: center;
+  color: #fff5e0;
+  background: rgba(24, 30, 28, .78);
+  border: 1px solid rgba(201, 168, 106, .8);
+  display: none;
+}
+
+.party-avatar {
+  position: relative; flex: none;
+  width: 46px; height: 46px; border-radius: 50%;
+  background:
+    radial-gradient(circle at 34% 26%, rgba(255, 255, 255, .9), rgba(255, 255, 255, .25) 46%, transparent 62%),
+    linear-gradient(150deg, var(--elem), rgba(20, 26, 25, .86));
+  border: 2px solid rgba(201, 168, 106, .92);
+  box-shadow: inset 0 0 12px rgba(255, 255, 255, .34), 0 2px 8px rgba(0, 0, 0, .35);
+  display: grid; place-items: center;
+  overflow: hidden;
+}
+.avatar-initial {
+  font-size: 22px; font-weight: 700; letter-spacing: 1px;
+  color: #fffaf0;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, .45), 0 0 8px var(--elem);
+}
+.party-elem {
+  position: absolute; right: -2px; bottom: -2px;
+  width: 19px; height: 19px; border-radius: 50%;
+  font-size: 10px; font-style: normal; font-weight: 700; line-height: 18px; text-align: center;
+  color: #2c2415;
+  background: var(--elem);
+  border: 1px solid rgba(255, 248, 230, .9);
+  box-shadow: 0 0 8px var(--elem);
+}
+
+.party-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.party-name {
+  font-size: 13px; font-weight: 600; letter-spacing: .5px;
+  color: rgba(255, 248, 232, .92);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .5);
+}
+.party-card.is-active .party-name { color: #45392a; text-shadow: none; }
+
+.hp {
+  position: relative;
+  height: 5px; width: 100%;
+  border-radius: 3px;
+  background: rgba(10, 16, 16, .46);
+  overflow: hidden;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, .35);
+}
+.hp-fill {
+  display: block; height: 100%; width: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #8fe6a1, #f2f7c9);
+  box-shadow: 0 0 8px rgba(190, 245, 190, .7);
+  transition: width .25s ease, background .25s;
+}
+.hp-fill.is-low { background: linear-gradient(90deg, #ff6b5a, #ffb488); box-shadow: 0 0 8px rgba(255, 120, 90, .7); }
+
+/* ==========================================================================
+   左下摇杆
+   ========================================================================== */
+.joystick {
+  position: absolute; left: 22px; bottom: 26px;
+  width: 148px; height: 148px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 255, 255, .14), rgba(255, 255, 255, .05) 56%, transparent 72%);
+  border: 1px solid rgba(255, 255, 255, .14);
+  box-shadow: inset 0 0 26px rgba(255, 255, 255, .06);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  touch-action: none;
+}
+.joystick.is-active { border-color: rgba(201, 168, 106, .55); box-shadow: inset 0 0 30px rgba(201, 168, 106, .16); }
+
+.joy-ring {
+  position: absolute; inset: 16px; border-radius: 50%;
+  border: 1px dashed rgba(255, 255, 255, .22);
+}
+.joy-ticks { position: absolute; inset: 12px; }
+.tick {
+  position: absolute; width: 2px; height: 10px; border-radius: 2px;
+  background: rgba(255, 255, 255, .34);
+}
+.tick.t-n { top: 0; left: 50%; margin-left: -1px; }
+.tick.t-s { bottom: 0; left: 50%; margin-left: -1px; }
+.tick.t-e { right: 0; top: 50%; margin-top: -1px; width: 10px; height: 2px; }
+.tick.t-w { left: 0; top: 50%; margin-top: -1px; width: 10px; height: 2px; }
+
+.joy-knob {
+  position: absolute; left: 50%; top: 50%;
+  width: 58px; height: 58px; margin: -29px 0 0 -29px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 34% 28%, #ffffff, #efe3c9 58%, #cdb68d 100%);
+  border: 1.5px solid rgba(201, 168, 106, .92);
+  box-shadow: 0 7px 16px rgba(0, 0, 0, .4), inset 0 1px 3px #fff, inset 0 -4px 10px rgba(150, 125, 80, .32);
+  transition: box-shadow .2s;
+  will-change: transform;
+}
+.joy-core {
+  position: absolute; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 255, 255, .95), rgba(201, 168, 106, .55));
+  box-shadow: 0 0 10px rgba(255, 255, 255, .7);
+}
+.joystick.is-active .joy-knob { box-shadow: 0 7px 18px rgba(0, 0, 0, .45), 0 0 16px rgba(201, 168, 106, .55), inset 0 1px 3px #fff; }
+
+.joy-label {
+  position: absolute; left: 50%; bottom: -20px; transform: translateX(-50%);
+  font-size: 11px; letter-spacing: 3px; color: rgba(255, 255, 255, .58); white-space: nowrap;
+}
+
+/* ==========================================================================
+   右下动作键
+   ========================================================================== */
+.cluster {
+  position: absolute; right: 26px; bottom: 26px;
+  width: 300px; height: 300px;
+  pointer-events: none;
+}
+
+.act {
+  position: absolute;
+  border-radius: 50%;
+  border: 2px solid rgba(201, 168, 106, .88);
+  background: radial-gradient(circle at 32% 26%, #fffdf6, #f4ead4 58%, #dcc9a4 100%);
+  color: #4a3b26;
+  display: grid; place-items: center;
+  cursor: pointer;
+  pointer-events: auto;
+  touch-action: none;
+  box-shadow: 0 8px 20px rgba(10, 16, 16, .42), inset 0 2px 3px #fff, inset 0 -6px 12px rgba(158, 130, 88, .34);
+  transition: transform .12s cubic-bezier(.3, .9, .3, 1), box-shadow .22s, filter .2s;
+  will-change: transform;
+}
+.act:active, .act.is-pressed { transform: scale(.93); box-shadow: 0 4px 12px rgba(10, 16, 16, .5), inset 0 2px 5px rgba(190, 165, 118, .5); }
+.act .ico { width: 46%; height: 46%; display: block; filter: drop-shadow(0 1px 0 rgba(255, 255, 255, .7)); }
+.act-name {
+  display: none;
+}
+.act-key {
+  position: absolute; left: 50%; top: -13px; transform: translateX(-50%);
+  min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px;
+  font-size: 9px; font-weight: 700; line-height: 15px; text-align: center;
+  color: #2d2517; background: rgba(247, 241, 226, .92);
+  border: 1px solid rgba(201, 168, 106, .9);
+}
+
+/* 普攻 */
+.act--attack {
+  right: 6px; bottom: 6px;
+  width: 106px; height: 106px;
+  border-width: 3px;
+  color: #5c4525;
+}
+.act--attack::before {
+  content: ""; position: absolute; inset: 7px; border-radius: 50%;
+  border: 1px solid rgba(201, 168, 106, .5);
+  box-shadow: inset 0 0 18px rgba(201, 168, 106, .12);
+  pointer-events: none;
+}
+.act--attack .ico { width: 50%; height: 50%; }
+
+/* 冲刺 */
+.act--sprint { right: 120px; bottom: 8px; width: 54px; height: 54px; }
+.act--sprint .ico { width: 42%; height: 42%; }
+
+/* 跳跃 */
+.act--jump { right: 6px; bottom: 140px; width: 50px; height: 50px; }
+.act--jump .ico { width: 38%; height: 38%; }
+
+/* 战技 */
+.act--skill {
+  right: 126px; bottom: 86px;
+  width: 66px; height: 66px;
+  color: var(--elem);
+}
+.act--skill .ico { width: 44%; height: 44%; }
+.act--skill::before {
+  content: ""; position: absolute; inset: 5px; border-radius: 50%;
+  border: 1px solid var(--elem);
+  opacity: .8;
+  pointer-events: none;
+}
+
+/* 技能冷却遮罩：从 12 点方向顺时针盖住剩余冷却 */
+.act-cd {
+  position: absolute; inset: -1px; border-radius: 50%;
+  background: conic-gradient(from 0deg, rgba(16, 22, 20, .62) calc(var(--cd, 0) * 1%), rgba(16, 22, 20, 0) 0);
+  pointer-events: none;
+  opacity: 0;
+}
+.act-cd.is-on { opacity: 1; }
+
+/* 爆发 */
+.act--burst {
+  right: 66px; bottom: 154px;
+  width: 66px; height: 66px;
+  color: var(--elem);
+}
+.act--burst .ico { width: 46%; height: 46%; opacity: .95; }
+.act-energy {
+  position: absolute; inset: 3px; border-radius: 50%;
+  background: conic-gradient(from 0deg, var(--elem) calc(var(--energy, 0) * 1%), rgba(0, 0, 0, 0) 0);
+  opacity: .28;
+  pointer-events: none;
+  transition: opacity .25s;
+}
+.act--burst.is-ready {
+  animation: burstPulse 1.6s ease-in-out infinite;
+  box-shadow: 0 8px 22px rgba(10, 16, 16, .42), 0 0 22px var(--elem), inset 0 2px 3px #fff;
+}
+.act--burst.is-ready .act-energy { opacity: .55; }
+@keyframes burstPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.055); }
+}
+
+/* 体力环：围绕普攻键的弧线 */
+.stam-ring {
+  position: absolute; inset: -9px; border-radius: 50%;
+  background: conic-gradient(from 0deg, rgba(146, 232, 178, .95) calc(var(--stam, 100) * 1%), rgba(0, 0, 0, 0) 0);
+  -webkit-mask: radial-gradient(closest-side, rgba(0,0,0,0) 84%, #000 85%);
+  mask: radial-gradient(closest-side, rgba(0,0,0,0) 84%, #000 85%);
+  opacity: 0;
+  transition: opacity .3s;
+  pointer-events: none;
+}
+.stam-ring.is-on { opacity: 1; }
+.stam-ring.is-empty { background: conic-gradient(from 0deg, rgba(255, 140, 116, .95) calc(var(--stam, 0) * 1%), rgba(0, 0, 0, 0) 0); }
+
+/* ==========================================================================
+   浮动伤害数字 / 提示
+   ========================================================================== */
+.floaters { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.floater {
+  position: absolute; left: 0; top: 0;
+  font-size: 20px; font-weight: 800; line-height: 1;
+  color: #fffdf2;
+  text-shadow: 0 0 3px rgba(0, 0, 0, .8), 0 2px 6px rgba(0, 0, 0, .65);
+  transform: translate(-50%, -50%);
+  will-change: transform, opacity;
+  white-space: nowrap;
+}
+.floater.crit { font-size: 26px; color: #ffe08a; }
+.floater.heal { color: #b4f7c0; }
+.floater.hurt { color: #ff8f7a; }
+
+.toast {
+  position: absolute; left: 50%; bottom: 300px; transform: translate(-50%, 10px);
+  padding: 8px 18px; border-radius: 20px;
+  font-size: 13px; letter-spacing: 1px; white-space: nowrap;
+  color: #fff7e6;
+  background: rgba(24, 30, 28, .62);
+  border: 1px solid rgba(201, 168, 106, .5);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  opacity: 0;
+  transition: opacity .3s, transform .3s;
+  pointer-events: none;
+}
+.toast.is-on { opacity: 1; transform: translate(-50%, 0); }
+
+/* 受击红闪 */
+.vignette.is-hurt { mix-blend-mode: normal; background: radial-gradient(120% 90% at 50% 50%, rgba(255, 70, 60, 0) 48%, rgba(255, 60, 50, .55) 100%); opacity: 1; transition: opacity .1s; }
+.vignette.is-hurt.is-out { opacity: 0; transition: opacity .5s ease-out; }
+
+/* ==========================================================================
+   开始界面
+   ========================================================================== */
+.start {
+  position: absolute; inset: 0; z-index: 20;
+  display: grid; place-items: center;
+  background:
+    radial-gradient(90% 70% at 50% 42%, rgba(24, 38, 36, .50), rgba(8, 13, 13, .90)),
+    linear-gradient(180deg, #16211f, #0a1010);
+  backdrop-filter: blur(6px);
+  transition: opacity .7s ease, visibility .7s;
+}
+.start.is-hidden { opacity: 0; visibility: hidden; pointer-events: none; }
+
+.start-inner {
+  width: min(88vw, 520px);
+  padding: 38px 34px 26px;
+  text-align: center;
+  border-radius: 20px;
+  background: linear-gradient(160deg, rgba(247, 241, 226, .94), rgba(233, 220, 192, .88));
+  border: 1px solid rgba(201, 168, 106, .8);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .55), inset 0 0 0 6px rgba(255, 255, 255, .35);
+  color: var(--ink);
+  position: relative;
+}
+.start-inner::before,
+.start-inner::after {
+  content: ""; position: absolute; left: 50%; width: 72%; height: 1px; transform: translateX(-50%);
+  background: linear-gradient(90deg, transparent, rgba(201, 168, 106, .75), transparent);
+}
+.start-inner::before { top: 14px; }
+.start-inner::after { bottom: 14px; }
+
+.start-mark {
+  font-size: 24px; color: var(--gold-deep);
+  letter-spacing: 8px; margin-bottom: 6px;
+  text-shadow: 0 0 12px rgba(201, 168, 106, .6);
+}
+.start h1 {
+  font-size: clamp(22px, 6vw, 30px);
+  font-weight: 700; letter-spacing: 4px;
+  color: #3d3324;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, .8);
+}
+.start-sub {
+  margin-top: 8px;
+  font-size: 12px; letter-spacing: 2px; color: #7d7059;
+}
+
+.load {
+  margin: 22px auto 18px;
+  width: 76%; height: 6px; border-radius: 3px;
+  background: rgba(90, 76, 50, .18);
+  overflow: hidden;
+}
+.load i {
+  display: block; height: 100%; width: 0%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #b79353, #e6cf9b);
+  box-shadow: 0 0 10px rgba(201, 168, 106, .8);
+  transition: width .25s ease;
+}
+
+.keys {
+  list-style: none;
+  display: flex; flex-direction: column; gap: 7px;
+  margin: 0 auto 22px;
+  padding: 14px 16px;
+  width: fit-content;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .38);
+  border: 1px solid rgba(201, 168, 106, .35);
+  font-size: 12.5px; color: #5f5443; letter-spacing: .5px;
+  text-align: left;
+}
+.keys b {
+  display: inline-block;
+  padding: 0 6px; margin-right: 2px;
+  border-radius: 5px;
+  background: rgba(74, 59, 38, .82);
+  color: #fff4dd;
+  font-weight: 600; font-size: 11.5px;
+  line-height: 19px;
+}
+
+.start-btn {
+  width: 78%; height: 48px;
+  border-radius: 24px;
+  border: 1px solid rgba(120, 96, 52, .8);
+  background: linear-gradient(180deg, #fdf8ea, #e7d7b5);
+  color: #4a3b26;
+  font-family: var(--font); font-size: 15px; font-weight: 600; letter-spacing: 4px;
+  cursor: pointer;
+  box-shadow: 0 8px 18px rgba(60, 46, 24, .28), inset 0 1px 2px #fff;
+  transition: transform .15s, box-shadow .2s, filter .2s;
+}
+.start-btn:not(:disabled):hover { filter: brightness(1.04); box-shadow: 0 10px 22px rgba(60, 46, 24, .34), 0 0 18px rgba(201, 168, 106, .55); }
+.start-btn:not(:disabled):active { transform: scale(.97); }
+.start-btn:disabled { opacity: .6; cursor: default; letter-spacing: 2px; }
+
+.start-tip {
+  margin-top: 14px;
+  font-size: 11px; letter-spacing: 1px; color: #8a7c63;
+}
+
+/* ==========================================================================
+   响应式
+   ========================================================================== */
+@media (max-width: 760px) {
+  .party { top: 14%; left: 10px; gap: 8px; }
+  .party-card { width: 118px; padding: 5px 12px 5px 5px; }
+  .party-card.is-active { width: 128px; }
+  .party-avatar { width: 38px; height: 38px; }
+  .avatar-initial { font-size: 18px; }
+  .party-name { font-size: 11.5px; }
+
+  .joystick { width: 124px; height: 124px; left: 16px; bottom: 22px; }
+  .joy-knob { width: 50px; height: 50px; margin: -25px 0 0 -25px; }
+  .joy-label { display: none; }
+
+  .cluster { right: 12px; bottom: 12px; width: 250px; height: 250px; }
+  .act--attack { width: 92px; height: 92px; right: 4px; bottom: 4px; }
+  .act--skill { right: 104px; bottom: 70px; width: 58px; height: 58px; }
+  .act--burst { right: 54px; bottom: 126px; width: 58px; height: 58px; }
+  .act--sprint { right: 100px; bottom: 4px; width: 48px; height: 48px; }
+  .act--jump { right: 4px; bottom: 116px; width: 44px; height: 44px; }
+  .act-key { display: none; }
+  .toast { bottom: 250px; font-size: 12px; }
+  .floater { font-size: 17px; }
+  .floater.crit { font-size: 22px; }
+}
+
+@media (max-height: 520px) {
+  .party { top: 50%; transform: translateY(-58%); }
+  .toast { bottom: 210px; }
+}
+
+@media (hover: none) {
+  .act-name { color: rgba(255, 252, 240, .7); }
+}
