@@ -794,10 +794,11 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
     return g;
   }
 
-  for (let i = 0; i < 9; i++) {
-    const a = (i / 9) * Math.PI * 2 + rand(-0.3, 0.3);
-    const r = i < 4 ? rand(7, 13) : rand(15, 32);
-    const x = Math.cos(a) * r, z = Math.sin(a) * r;
+  // 7 只怪，最近的也在 9m 外，避免一开局就被笑脸球包围
+  for (let i = 0; i < 7; i++) {
+    const a = (i / 7) * Math.PI * 2 + rand(-0.3, 0.3);
+    const r = i < 3 ? rand(9, 16) : rand(18, 34);
+    const x = Math.cos(a) * r, z = Math.sin(a) * r + SPAWN.z * 0.4;
     const s = spawnSlime(i);
     s.position.set(x, groundHeight(x, z), z);
     s.userData.home.copy(s.position);
@@ -1514,9 +1515,9 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
       const toPlayer = new THREE.Vector3().subVectors(player.pos, en.position);
       toPlayer.y = 0;
       const dist = toPlayer.length();
-      if (dist < 19 && dist > 1.35 && state.started) {
+      if (dist < 19 && dist > 1.75 && state.started) {
         toPlayer.normalize();
-        en.position.addScaledVector(toPlayer, dt * 1.55);
+        en.position.addScaledVector(toPlayer, dt * 1.15);
         en.rotation.y = dampAngle(en.rotation.y, Math.atan2(toPlayer.x, toPlayer.z), 6, dt);
       }
       en.position.y = groundHeight(en.position.x, en.position.z);
@@ -1552,7 +1553,7 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
       }
 
       // 接触造成伤害
-      if (state.started && dist < 1.5 && state.hurtCd <= 0) {
+      if (state.started && dist < 1.95 && state.hurtCd <= 0) {
         damagePlayer(16);
         state.hurtCd = 1.4;
         // 推开
