@@ -1790,6 +1790,13 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
     }, 420);
   }
 
+  // file:// 打开时模型必被拦截，直接在开始面板说明原因
+  if (location.protocol === 'file:') {
+    const warn = document.getElementById('file-warn');
+    if (warn) warn.hidden = false;
+    if (ui.startBtn) ui.startBtn.textContent = '请用本地服务器打开';
+  }
+
   ui.startBtn.textContent = '正在载入角色模型…';
 
   ui.startBtn.addEventListener('click', () => {
