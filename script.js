@@ -494,6 +494,8 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
     jumpH: 0,
     vy: 0,
     airborne: false,
+    landT: 0,
+    takeoffT: 0,
     speed: 0,
     runPhase: 0,
     swingT: 0,
@@ -588,33 +590,6 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
     return { holder, inner, mesh, bones };
   }
 
-  // VMD 跑步动作（女：女运动中跑 / 男：男快跑）
-  const MOTION_PATHS = {
-    anastasya: './resources/motion/run_f.vmd',
-    razor: './resources/motion/run_m.vmd',
-  };
-  const vmdLoader = new MMDLoader();
-
-  function attachMotion(asset, url) {
-    return new Promise((resolve) => {
-      // loadAnimation 会把 VMD 轨道自动绑定到模型骨骼上
-      vmdLoader.loadAnimation(url, asset.mesh, (clip) => {
-        if (!clip || !clip.tracks || !clip.tracks.length) return resolve(false);
-        asset.mixclips = clip;
-        asset.mixer = new THREE.AnimationMixer(asset.mesh);
-        asset.runAction = asset.mixer.clipAction(clip);
-        asset.runAction.setLoop(THREE.LoopRepeat, Infinity);
-        asset.runAction.clampWhenFinished = false;
-        asset.running = false;
-        asset.motionName = clip.tracks.length + ' 条轨道 · ' + clip.duration.toFixed(2) + 's';
-        resolve(true);
-      }, undefined, (err) => {
-        console.warn('[VMD] 载入失败：' + url, err && err.message);
-        resolve(false);
-      });
-    });
-  }
-
   function applyMmdForActive() {
     mmdPlayers.forEach((a, i) => { if (a) a.holder.visible = i === state.active; });
     const asset = mmdPlayers[state.active];
@@ -632,32 +607,9 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
     if (asset) asset.holder.position.copy(player.root.position);
   }
 
-  // 程序化骨骼动画（无 VMD 时的兜底：走路/待机/攻击/跳跃姿态）
+  // 程序化骨骼动画：走路 / 待机 / 跳跃 / 攻击姿态
   function animateMmd(asset, dt, moving) {
     if (!asset) return;
-
-    /* ---------- 有跑步 VMD：移动交给动作，静止/跳跃回程序化 ---------- */
-    if (asset.runAction) {
-      const wantRun = moving && !player.airborne && player.swingT <= 0;
-      if (wantRun && !asset.running) {
-        asset.running = true;
-        asset.runAction.reset();
-        asset.runAction.setEffectiveTimeScale(state.sprinting ? 1.4 : 1.1);
-        asset.runAction.play();
-      } else if (!wantRun && asset.running) {
-        asset.running = false;
-        asset.runAction.stop();
-        // 复位全部骨骼，避免停留在动作的最后一帧
-        Object.keys(asset.bones.base).forEach((k) => {
-          const b = asset.bones.map[k];
-          if (b) b.rotation.copy(asset.bones.base[k]);
-        });
-      }
-      if (asset.running) {
-        asset.mixer.update(dt);
-        return;
-      }
-    }
 
     const map = asset.bones.map, base = asset.bones.base;
     if (!map['センター'] && !map['上半身']) return;
@@ -670,10 +622,17 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
     const t = player.modelTime || 0;
     player.modelTime = t + dt;
 
+    const up = clamp(player.vy / CFG.jumpPower, -1, 1);
+    const rise = Math.max(0, up);          // 上升阶段：收腿
+    const fall = Math.max(0, -up);         // 下落阶段：伸腿准备着地
+
     if (player.airborne) {
-      set('左足', 'x', -0.42); set('右足', 'x', -0.30);
-      set('左ひざ', 'x', 0.72); set('右ひざ', 'x', 0.48);
-      set('左腕', 'x', -0.28); set('右腕', 'x', -0.28);
+      set('左足', 'x', -0.26 - 0.46 * rise + 0.16 * fall);
+      set('右足', 'x', -0.14 - 0.34 * rise + 0.12 * fall);
+      set('左ひざ', 'x', 0.30 + 0.78 * rise - 0.08 * fall);
+      set('右ひざ', 'x', 0.18 + 0.58 * rise - 0.02 * fall);
+      set('左腕', 'x', -0.18 - 0.34 * rise + 0.24 * fall);
+      set('右腕', 'x', -0.18 - 0.34 * rise + 0.24 * fall);
     } else if (moving) {
       set('左足', 'x', sw * 0.58 * amp);
       set('右足', 'x', -sw * 0.58 * amp);
@@ -711,6 +670,26 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
       set('上半身', 'y', 0);
       set('右ひじ', 'x', 0);
     }
+
+    /* ---------- 落地缓冲 + 起跳拉伸（身体弹性） ---------- */
+    player.landT = Math.max(0, player.landT - dt);
+    player.takeoffT = Math.max(0, player.takeoffT - dt);
+    const land = player.landT > 0 ? Math.sin((player.landT / 0.30) * Math.PI) : 0;
+    const launch = player.takeoffT > 0 ? Math.sin((player.takeoffT / 0.16) * Math.PI) : 0;
+
+    if (land > 0) {
+      const add = (name, axis, v) => { const b = map[name]; if (b) b.rotation[axis] += v; };
+      add('左ひざ', 'x', land * 0.46);
+      add('右ひざ', 'x', land * 0.46);
+      add('上半身', 'x', land * 0.10);
+      add('センター', 'y', -land * 0.06);
+      asset.holder.position.y = player.root.position.y - land * 0.10;
+    } else {
+      asset.holder.position.y = player.root.position.y;
+    }
+
+    const sq = land * 0.12 - launch * 0.07;   // 落地压扁 / 起跳拉长
+    asset.holder.scale.set(1 + sq * 0.55, 1 - sq, 1 + sq * 0.55);
   }
 
   function attachVerityVisual(en) {
@@ -751,10 +730,7 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
       mmdDone.n++;
       const prepared = mesh ? prepareMmd(mesh, PARTY[i].modelHeight) : null;
       mmdPlayers[i] = prepared;
-      if (prepared) {
-        await attachMotion(prepared, MOTION_PATHS[PARTY[i].model]);
-        applyMmdForActive();
-      }
+      if (prepared) applyMmdForActive();
     }
     const vm = await loadMmd(MMD_PATHS.verity, 'verity');
     mmdDone.n++;
@@ -1369,8 +1345,10 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
   function doJump() {
     if (!state.started || player.airborne) return;
     player.airborne = true;
-    player.vy = CFG.jumpPower;
-    spawnParticles(player.pos.clone().add(new THREE.Vector3(0, 0.15, 0)), 0xe8ead2, 10, 1.8, { up: 0.4, grav: 1.5, life: 0.5 });
+    player.vy = CFG.jumpPower * (state.sprinting ? 1.08 : 1);
+    player.takeoffT = 0.16;
+    spawnParticles(player.pos.clone().add(new THREE.Vector3(0, 0.15, 0)), 0xe8ead2, 14, 1.9, { up: 0.45, grav: 1.6, life: 0.5 });
+    spawnRing(player.pos.clone().add(new THREE.Vector3(0, 0.05, 0)), 0xf4efdb, 1.3, 0.32);
   }
 
   function switchCharacter(i) {
@@ -1480,9 +1458,19 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
       player.vy -= CFG.gravity * dt;
       player.jumpH += player.vy * dt;
       if (player.jumpH <= 0) {
+        const drop = Math.abs(player.vy);
         player.jumpH = 0;
         player.vy = 0;
         player.airborne = false;
+        player.landT = 0.30;
+        if (drop > 3.2) {
+          spawnParticles(
+            player.pos.clone().add(new THREE.Vector3(0, 0.12, 0)),
+            0xdcd7bd, 16, 2.2, { up: 0.55, grav: 2.4, life: 0.55 }
+          );
+          spawnRing(player.pos.clone().add(new THREE.Vector3(0, 0.06, 0)), 0xf2ecd8, 1.7, 0.42);
+          state.shake = Math.max(state.shake, Math.min(0.22, drop * 0.018));
+        }
       }
     }
 
