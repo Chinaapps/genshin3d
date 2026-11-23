@@ -1,8 +1,13 @@
 /* ==========================================================================
    提瓦特 · 3D 探索框架  |  script.js
-   依赖：resources/vendor/three.min.js（全局 THREE，UMD 版，双击 HTML 也能跑）
+   依赖：three r158 + MMDLoader（本地 vendor，ES Module）
+   角色：冰之女皇 Anastasya / 雷泽（PMX 模型），敌人：verity（Q 弹怪）
    结构：配置 → 舞台 → 世界 → 角色 → 敌人 → 特效 → 输入 → 战斗 → 主循环
    ========================================================================== */
+import * as THREE from 'three';
+import { MMDLoader } from 'three/addons/loaders/MMDLoader.js';
+import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
+
 (function () {
   'use strict';
 
@@ -38,10 +43,8 @@
   };
 
   const PARTY = [
-    { id: 0, name: '荧', element: 'anemo', maxHp: 1080 },
-    { id: 1, name: '钟离', element: 'geo', maxHp: 1460 },
-    { id: 2, name: '雷电将军', element: 'electro', maxHp: 1320 },
-    { id: 3, name: '甘雨', element: 'cryo', maxHp: 980 },
+    { id: 0, name: '冰之女皇', element: 'cryo', maxHp: 1320, model: 'anastasya', modelHeight: 1.82 },
+    { id: 1, name: '雷泽', element: 'electro', maxHp: 1180, model: 'razor', modelHeight: 1.76 },
   ];
 
   const SPAWN = { x: 0, z: 5.5 };
@@ -522,6 +525,185 @@
 
   function accentColor() { return ELEMENTS[PARTY[state.active].element]; }
 
+  /* ---------- MMD 模型（PMX 本地加载：冰之女皇 / 雷泽 / verity） ---------- */
+  const MMD_YAW_FIX = Math.PI;      // MMD 模型本地朝向 -Z，游戏角色朝向 +Z
+  const mmdLoader = new MMDLoader();
+  const MMD_PATHS = {
+    anastasya: './resources/models/anastasya/anastasya.pmx',
+    razor: './resources/models/razor/razor.pmx',
+    verity: './resources/models/verity/verity.pmx',
+  };
+  const mmdPlayers = [];
+  let mmdVerity = null;
+  const mmdDone = { n: 0, total: 3, failed: 0 };
+
+  function loadMmd(url, tag) {
+    return new Promise((resolve) => {
+      mmdLoader.load(url, (mesh) => resolve(mesh), null, (err) => {
+        console.warn('[MMD] 载入失败：' + tag, err);
+        mmdDone.failed++;
+        resolve(null);
+      });
+    });
+  }
+
+  function prepareMmd(mesh, targetHeight) {
+    const box = new THREE.Box3().setFromObject(mesh);
+    const h = Math.max(0.001, box.max.y - box.min.y);
+    const k = targetHeight / h;
+    mesh.scale.setScalar(k);
+    mesh.position.set(0, -box.min.y * k, 0);
+    mesh.traverse((m) => {
+      if (!m.isMesh) return;
+      m.castShadow = true;
+      m.receiveShadow = true;
+      m.frustumCulled = false;
+      const mats = Array.isArray(m.material) ? m.material : [m.material];
+      mats.forEach((mt) => {
+        if (!mt) return;
+        mt.side = THREE.DoubleSide;
+        // 保留贴图原本的饱和度：不受场景 ACES 曝光影响（否则黄色笑脸会被洗成米白）
+        mt.toneMapped = false;
+        if (mt.map) mt.map.colorSpace = THREE.SRGBColorSpace;
+        if (mt.emissive) mt.emissive.setRGB(0.14, 0.14, 0.14);
+      });
+    });
+    const inner = new THREE.Group();
+    inner.add(mesh);
+    const holder = new THREE.Group();
+    holder.add(inner);
+    holder.visible = false;
+    holder.rotation.y = MMD_YAW_FIX;
+    world.add(holder);
+    const bones = { map: {}, base: {} };
+    if (mesh.skeleton) {
+      mesh.skeleton.bones.forEach((b) => {
+        bones.map[b.name] = b;
+        bones.base[b.name] = b.rotation.clone();
+      });
+    }
+    return { holder, inner, mesh, bones };
+  }
+
+  function applyMmdForActive() {
+    mmdPlayers.forEach((a, i) => { if (a) a.holder.visible = i === state.active; });
+    const asset = mmdPlayers[state.active];
+    player.mmd = asset || null;
+    if (player.glow) {
+      if (asset) {
+        asset.holder.add(player.glow);
+        player.glow.position.set(0, 0.03, 0);
+      } else if (player.root) {
+        player.root.add(player.glow);
+        player.glow.position.set(0, 0.03, 0);
+      }
+    }
+    player.root.visible = !asset;
+    if (asset) asset.holder.position.copy(player.root.position);
+  }
+
+  // 程序化骨骼动画（没有 VMD 动作文件，用走路/待机/攻击/跳跃姿态）
+  function animateMmd(asset, dt, moving) {
+    const map = asset.bones.map, base = asset.bones.base;
+    if (!map['センター'] && !map['上半身']) return;
+    const set = (name, axis, v) => {
+      const b = map[name];
+      if (b && base[name]) b.rotation[axis] = base[name][axis] + v;
+    };
+    const sw = Math.sin(player.runPhase);
+    const amp = clamp(player.speed / CFG.walkSpeed, 0, 1.25);
+    const t = player.modelTime || 0;
+    player.modelTime = t + dt;
+
+    if (player.airborne) {
+      set('左足', 'x', -0.42); set('右足', 'x', -0.30);
+      set('左ひざ', 'x', 0.72); set('右ひざ', 'x', 0.48);
+      set('左腕', 'x', -0.28); set('右腕', 'x', -0.28);
+    } else if (moving) {
+      set('左足', 'x', sw * 0.58 * amp);
+      set('右足', 'x', -sw * 0.58 * amp);
+      set('左ひざ', 'x', Math.max(0, -sw) * 0.72 * amp);
+      set('右ひざ', 'x', Math.max(0, sw) * 0.72 * amp);
+      set('左腕', 'x', -sw * 0.42 * amp);
+      set('右腕', 'x', sw * 0.34 * amp);
+      set('左肩', 'z', sw * 0.05 * amp);
+      set('右肩', 'z', -sw * 0.05 * amp);
+    } else {
+      const idle = Math.sin(t * 1.8) * 0.035;
+      set('左足', 'x', 0); set('右足', 'x', 0);
+      set('左ひざ', 'x', 0.02); set('右ひざ', 'x', 0.02);
+      set('左腕', 'x', idle); set('右腕', 'x', -idle);
+      set('左肩', 'z', 0); set('右肩', 'z', 0);
+    }
+
+    set('上半身', 'x', 0.045 * amp + Math.sin(t * 1.6) * 0.012);
+    set('上半身', 'z', moving ? sw * 0.05 * amp : 0);
+    set('センター', 'y', Math.abs(sw) * 0.018 * amp);
+    set('首', 'x', -0.02 * amp);
+
+    // 普攻：右臂挥砍
+    if (player.swingT > 0) {
+      const k = 1 - player.swingT;
+      const arc = Math.sin(k * Math.PI);
+      set('右腕', 'x', -1.55 * arc - 0.15);
+      set('右腕', 'z', 0.45 * arc);
+      set('右ひじ', 'x', -0.55 * arc);
+      set('上半身', 'y', -0.42 * arc);
+    } else {
+      set('上半身', 'y', 0);
+      set('右ひじ', 'x', 0);
+    }
+  }
+
+  function attachVerityVisual(en) {
+    if (!mmdVerity || en.userData.mmd) return;
+    const mesh = cloneSkeleton(mmdVerity.mesh);
+    const mats = [];
+    mesh.traverse((m) => {
+      if (!m.isMesh) return;
+      m.castShadow = true;
+      m.frustumCulled = false;
+      // 材质按怪独立克隆，受击发光才能各闪各的
+      m.material = (Array.isArray(m.material) ? m.material : [m.material]).map((mt) => {
+        const c = mt.clone();
+        if (c.emissive) mats.push(c);
+        return c;
+      });
+      if (m.material.length === 1) m.material = m.material[0];
+    });
+    const holder = new THREE.Group();
+    holder.rotation.y = MMD_YAW_FIX;
+    holder.add(mesh);
+    en.children.slice().forEach((c) => { c.visible = false; });
+    en.add(holder);
+    en.userData.mmd = holder;
+    en.userData.mmdMats = mats;
+  }
+
+  function onModelsReady() {
+    mmdPlayers.forEach((a, i) => { if (a) a.holder.visible = state.started ? i === state.active : false; });
+    applyMmdForActive();
+    if (mmdDone.failed === 0) toast('角色模型载入完成 · 冰之女皇 / 雷泽', 2200);
+  }
+
+  (async function loadModels() {
+    for (let i = 0; i < PARTY.length; i++) {
+      const mesh = await loadMmd(MMD_PATHS[PARTY[i].model], PARTY[i].name);
+      mmdDone.n++;
+      const prepared = mesh ? prepareMmd(mesh, PARTY[i].modelHeight) : null;
+      mmdPlayers[i] = prepared;
+      if (prepared) applyMmdForActive();
+    }
+    const vm = await loadMmd(MMD_PATHS.verity, 'verity');
+    mmdDone.n++;
+    mmdVerity = vm ? prepareMmd(vm, 1.35) : null;
+    if (mmdVerity) enemies.forEach(attachVerityVisual);
+    onModelsReady();
+  })();
+  setTimeout(() => {
+    if (mmdDone.n < mmdDone.total) { mmdDone.n = mmdDone.total; onModelsReady(); }
+  }, 25000);
+
   function buildPlayer() {
     if (player.root) {
       world.remove(player.root);
@@ -556,6 +738,7 @@
 
     document.documentElement.style.setProperty('--elem', ELEMENTS[PARTY[state.active].element].css);
     player.root.position.y = groundHeight(player.pos.x, player.pos.z) + player.jumpH;
+    applyMmdForActive();
   }
 
   buildPlayer();
@@ -1245,6 +1428,13 @@
     player.root.position.set(player.pos.x, gy + player.jumpH, player.pos.z);
     player.root.rotation.y = player.heading;
 
+    // PMX 模型跟随玩家（位置 / 朝向 / 程序化骨骼动画）
+    if (player.mmd) {
+      player.mmd.holder.position.copy(player.root.position);
+      player.mmd.holder.rotation.y = player.heading + MMD_YAW_FIX;
+      animateMmd(player.mmd, dt, moving);
+    }
+
     /* ---------- 动作姿态 ---------- */
     const p = player.parts;
     const moveK = clamp(player.speed / CFG.walkSpeed, 0, 1.6);
@@ -1338,6 +1528,13 @@
       u.body.position.y = 0.62;
       u.leaf.rotation.z = 0.2 + Math.sin(elapsed * 2.6 + u.bobPhase) * 0.16;
 
+      // Q 弹怪：整只模型做果冻式挤压 / 拉伸
+      if (u.mmd) {
+        const squash = 1 + bob * 0.18;
+        u.mmd.scale.set(1 / Math.sqrt(squash), squash, 1 / Math.sqrt(squash));
+        u.mmd.position.y = bob * 0.22;
+      }
+
       // 受击闪光
       if (u.flash > 0) {
         u.flash = Math.max(0, u.flash - dt * 4);
@@ -1345,6 +1542,13 @@
         en.scale.setScalar(1 + u.flash * 0.08);
       } else {
         en.scale.setScalar(1);
+      }
+      // MMD 怪受击泛红
+      if (u.mmdMats) {
+        const g = 0.14 + Math.max(0, u.flash) * 0.62;
+        for (let mi = 0; mi < u.mmdMats.length; mi++) {
+          u.mmdMats[mi].emissive.setRGB(g, 0.14, 0.14);
+        }
       }
 
       // 接触造成伤害
@@ -1484,15 +1688,20 @@
      16. 开场
      ========================================================= */
   let progress = 0;
+  ui.startBtn.textContent = '正在载入角色模型…';
   const loadTick = setInterval(() => {
-    progress = Math.min(100, progress + rand(6, 16));
-    ui.loadBar.style.width = progress + '%';
-    if (progress >= 100) {
+    // 进度跟随 PMX 模型加载（三个文件），加载完后补满
+    const target = 12 + (mmdDone.n / mmdDone.total) * 88;
+    progress = Math.min(target, progress + 6);
+    if (mmdDone.n >= mmdDone.total) progress = Math.min(100, progress + 8);
+    ui.loadBar.style.width = progress.toFixed(1) + '%';
+    if (progress >= 99.5) {
       clearInterval(loadTick);
+      ui.loadBar.style.width = '100%';
       ui.startBtn.disabled = false;
       ui.startBtn.textContent = '进入提瓦特';
     }
-  }, 90);
+  }, 95);
 
   ui.startBtn.addEventListener('click', () => {
     if (ui.startBtn.disabled) return;
@@ -1517,4 +1726,6 @@
     state.lookAt.copy(player.pos).add(new THREE.Vector3(0, 1.6, 0));
     camera.lookAt(state.lookAt);
   })();
+
+  window.__TEYVAT_DEBUG = { scene, world, enemies, state, mmdPlayers, mmdVerity, player, camera, renderer, THREE };
 })();

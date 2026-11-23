@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#10161a">
 <title>提瓦特 · 3D 探索框架</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='25' font-size='25'%3E%F0%9F%92%A0%3C/text%3E%3C/svg%3E">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -18,35 +19,19 @@
 
     <!-- 左侧：队伍列表 -->
     <div class="party" id="party">
-      <div class="party-card is-active" data-index="0" style="--elem:#6fc9bd">
+      <div class="party-card is-active" data-index="0" style="--elem:#8fd6ee">
         <span class="party-key">1</span>
-        <div class="party-avatar"><span class="avatar-initial">荧</span><i class="party-elem">风</i></div>
+        <div class="party-avatar"><span class="avatar-initial">冰</span><i class="party-elem">冰</i></div>
         <div class="party-info">
-          <span class="party-name">荧</span>
+          <span class="party-name">冰之女皇</span>
           <div class="hp"><i class="hp-fill"></i></div>
         </div>
       </div>
-      <div class="party-card" data-index="1" style="--elem:#e8b34a">
+      <div class="party-card" data-index="1" style="--elem:#b488e0">
         <span class="party-key">2</span>
-        <div class="party-avatar"><span class="avatar-initial">钟</span><i class="party-elem">岩</i></div>
-        <div class="party-info">
-          <span class="party-name">钟离</span>
-          <div class="hp"><i class="hp-fill"></i></div>
-        </div>
-      </div>
-      <div class="party-card" data-index="2" style="--elem:#b488e0">
-        <span class="party-key">3</span>
         <div class="party-avatar"><span class="avatar-initial">雷</span><i class="party-elem">雷</i></div>
         <div class="party-info">
-          <span class="party-name">雷电将军</span>
-          <div class="hp"><i class="hp-fill"></i></div>
-        </div>
-      </div>
-      <div class="party-card" data-index="3" style="--elem:#8fd6ee">
-        <span class="party-key">4</span>
-        <div class="party-avatar"><span class="avatar-initial">甘</span><i class="party-elem">冰</i></div>
-        <div class="party-info">
-          <span class="party-name">甘雨</span>
+          <span class="party-name">雷泽</span>
           <div class="hp"><i class="hp-fill"></i></div>
         </div>
       </div>
@@ -113,12 +98,12 @@
     <div class="start-inner">
       <div class="start-mark">✦</div>
       <h1>提瓦特 · 探索框架</h1>
-      <p class="start-sub">3D 场景 · 队伍切换 · 战斗与技能 HUD</p>
+      <p class="start-sub">冰之女皇 / 雷泽 · 3D 场景 · 战斗与技能 HUD</p>
       <div class="load"><i id="load-bar"></i></div>
       <ul class="keys">
         <li><b>WASD</b> 移动　<b>Shift</b> 冲刺　<b>空格</b> 跳跃</li>
         <li><b>拖动画面</b> 转视角　<b>滚轮</b> 缩放</li>
-        <li><b>E</b> 元素战技　<b>Q</b> 元素爆发　<b>1–4</b> 切换角色</li>
+        <li><b>E</b> 元素战技　<b>Q</b> 元素爆发　<b>1–2</b> 切换角色</li>
       </ul>
       <button class="start-btn" id="start-btn" disabled>正在进入提瓦特…</button>
       <p class="start-tip">建议使用 Chrome / Edge / Safari，手机请横屏体验</p>
@@ -126,7 +111,14 @@
   </div>
 </div>
 
-<script src="resources/vendor/three.min.js"></script>
-<script src="script.js"></script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "./resources/vendor/three.module.js",
+    "three/addons/": "./resources/vendor/addons/"
+  }
+}
+</script>
+<script type="module" src="script.js"></script>
 </body>
 </html>
