@@ -79,6 +79,27 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
      2. 地形高度（全场景共用同一个函数，保证角色贴地）
      ========================================================= */
   const PLATEAU = 1.55;
+
+  // 水坑：地形挖坑 + 水面（水没有碰撞，可直接走进去）
+  const WATER_PONDS = [
+    { x: -12.5, z: 10.5, r: 3.8, depth: 1.6 },
+    { x: 13.0, z: -7.0, r: 3.4, depth: 1.4 },
+    { x: 5.5, z: 17.5, r: 4.4, depth: 1.9 },
+    { x: -16.0, z: -9.0, r: 3.0, depth: 1.2 },
+  ];
+  WATER_PONDS.forEach((p) => { p.waterY = 0; });
+
+  function pondDepth(x, z) {
+    let dip = 0;
+    for (let i = 0; i < WATER_PONDS.length; i++) {
+      const p = WATER_PONDS[i];
+      const d = Math.hypot(x - p.x, z - p.z);
+      if (d >= p.r) continue;
+      dip += p.depth * (1 - smoothstep(p.r * 0.45, p.r, d));
+    }
+    return dip;
+  }
+
   function groundHeight(x, z) {
     const base =
       Math.sin(x * 0.085) * 1.45 +
@@ -87,7 +108,15 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
       Math.cos(x * 0.021 - z * 0.031) * 1.0;
     const d = Math.hypot(x, z);
     const k = smoothstep(9, 20, d);       // 出生点附近压平成一块小场地
-    return base * k + PLATEAU * (1 - k);
+    return base * k + PLATEAU * (1 - k) - pondDepth(x, z);
+  }
+
+  function pondAt(x, z) {
+    for (let i = 0; i < WATER_PONDS.length; i++) {
+      const p = WATER_PONDS[i];
+      if (Math.hypot(x - p.x, z - p.z) < p.r * 0.92) return p;
+    }
+    return null;
   }
 
   /* =========================================================
@@ -211,7 +240,7 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
 
   /* ---------- 地面 ---------- */
   (function buildTerrain() {
-    const seg = 128, size = 180;
+    const seg = 176, size = 180;
     const geo = new THREE.PlaneGeometry(size, size, seg, seg);
     geo.rotateX(-Math.PI / 2);
 
@@ -238,6 +267,8 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
       tmp.lerp(cStone, smoothstep(4.4, 6.2, h) * 0.55);
       if (flat > 0.5) tmp.lerp(new THREE.Color(0xa8bd6a), 0.18);
       if (onPath > 0) tmp.lerp(new THREE.Color(0xbb9d70), onPath * 0.55);
+      const wet = pondDepth(x, z);
+      if (wet > 0.02) tmp.lerp(new THREE.Color(0x6d6a4a), Math.min(1, wet / 1.4) * 0.75);
       const n = (rng() - 0.5) * 0.035;
       colors[i * 3] = clamp(tmp.r + n, 0, 1);
       colors[i * 3 + 1] = clamp(tmp.g + n, 0, 1);
@@ -254,6 +285,115 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
     ground.receiveShadow = true;
     world.add(ground);
   })();
+
+  /* ---------- 水坑：水面 + 池边石头（水无碰撞，可直接踏入） ---------- */
+  const waterSurfaces = [];
+  const rippleRing = [];
+  (function buildPonds() {
+    // 水色径向渐变纹理（中心深、边缘浅）
+    const wc = document.createElement('canvas');
+    wc.width = wc.height = 256;
+    const wx = wc.getContext('2d');
+    const wg = wx.createRadialGradient(128, 128, 6, 128, 128, 124);
+    wg.addColorStop(0, 'rgba(18, 74, 104, 1)');
+    wg.addColorStop(0.55, 'rgba(40, 118, 158, 1)');
+    wg.addColorStop(1, 'rgba(120, 196, 226, 1)');
+    wx.fillStyle = wg;
+    wx.beginPath();
+    wx.arc(128, 128, 124, 0, Math.PI * 2);
+    wx.fill();
+    // 水面反光斑
+    for (let i = 0; i < 60; i++) {
+      const x = 30 + Math.random() * 196, y = 30 + Math.random() * 196;
+      wx.strokeStyle = 'rgba(235,250,255,' + (0.2 + Math.random() * 0.35) + ')';
+      wx.lineWidth = 1 + Math.random() * 2;
+      const w = 6 + Math.random() * 22;
+      wx.beginPath();
+      wx.moveTo(x, y);
+      wx.lineTo(x + w, y + (Math.random() - 0.5) * 6);
+      wx.stroke();
+    }
+    const waterTex = new THREE.CanvasTexture(wc);
+    waterTex.colorSpace = THREE.SRGBColorSpace;
+
+    const rockGeo = new THREE.IcosahedronGeometry(1, 0);
+    const rockMat = new THREE.MeshStandardMaterial({ color: 0x8f948a, roughness: 0.95, flatShading: true });
+    const rockMat2 = new THREE.MeshStandardMaterial({ color: 0x7b8a76, roughness: 0.95, flatShading: true });
+    WATER_PONDS.forEach((p) => {
+      const rimY = groundHeight(p.x + p.r * 1.02, p.z);
+      const waterY = rimY - 0.5;
+      p.waterY = waterY;
+
+      // 不规则池形：圆盘顶点做半径抖动
+      const wGeo = new THREE.CircleGeometry(p.r * 0.8, 56);
+      const wPos = wGeo.attributes.position;
+      for (let vi = 1; vi < wPos.count; vi++) {
+        const x = wPos.getX(vi), y = wPos.getY(vi);
+        const ang = Math.atan2(y, x);
+        const wob = 1 + Math.sin(ang * 3 + p.x * 0.3) * 0.05 + Math.sin(ang * 7 + p.z * 0.2) * 0.035;
+        wPos.setXY(vi, x * wob, y * wob);
+      }
+      wGeo.computeVertexNormals();
+      const surf = new THREE.Mesh(
+        wGeo,
+        new THREE.MeshStandardMaterial({
+          map: waterTex, transparent: true, opacity: 0.62,
+          roughness: 0.12, metalness: 0.35, depthWrite: false, side: THREE.DoubleSide,
+        })
+      );
+      surf.rotation.x = -Math.PI / 2;
+      surf.position.set(p.x, waterY, p.z);
+      surf.receiveShadow = true;
+      surf.userData.baseY = waterY;
+      surf.userData.phase = Math.random() * 6.28;
+      world.add(surf);
+      waterSurfaces.push(surf);
+
+      // 水面涟漪圈
+      for (let k = 0; k < 2; k++) {
+        const ring = new THREE.Mesh(
+          new THREE.RingGeometry(p.r * (0.55 + k * 0.2), p.r * (0.6 + k * 0.2), 40),
+          new THREE.MeshBasicMaterial({
+            color: 0xd6f2ff, transparent: true, opacity: 0.16,
+            blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+          })
+        );
+        ring.rotation.x = -Math.PI / 2;
+        ring.position.set(p.x, waterY + 0.02, p.z);
+        ring.userData = { baseY: waterY + 0.02, phase: k * 2.1, r: p.r };
+        world.add(ring);
+        rippleRing.push(ring);
+      }
+
+      // 池边一圈石头
+      const n = Math.max(7, Math.round(p.r * 2.4));
+      for (let k = 0; k < n; k++) {
+        const a = (k / n) * Math.PI * 2 + rand(-0.12, 0.12);
+        const rr = p.r * rand(0.98, 1.1);
+        const x = p.x + Math.cos(a) * rr, z = p.z + Math.sin(a) * rr;
+        const sc = rand(0.34, 0.7);
+        const rock = new THREE.Mesh(rockGeo, Math.random() < 0.5 ? rockMat : rockMat2);
+        rock.position.set(x, groundHeight(x, z) + sc * 0.35, z);
+        rock.scale.set(sc, sc * rand(0.6, 0.85), sc);
+        rock.rotation.set(rand(0, 3), rand(0, 3), rand(0, 3));
+        rock.castShadow = true;
+        world.add(rock);
+      }
+    });
+  })();
+
+  function updateWaters(elapsed, dt) {
+    waterSurfaces.forEach((w) => {
+      w.position.y = w.userData.baseY + Math.sin(elapsed * 1.4 + w.userData.phase) * 0.035;
+      w.material.opacity = 0.6 + Math.sin(elapsed * 0.8 + w.userData.phase) * 0.05;
+    });
+    rippleRing.forEach((r) => {
+      const t = (elapsed * 0.16 + r.userData.phase) % 1;
+      const k = 1 + t * 0.13;
+      r.scale.set(k, k, 1);
+      r.material.opacity = 0.2 * (1 - t);
+    });
+  }
 
   /* ---------- 空气光尘（氛围） ---------- */
   (function buildMotes() {
@@ -317,13 +457,16 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
   for (let i = 0; i < 64; i++) {
     const a = rng() * Math.PI * 2;
     const r = 11 + Math.pow(rng(), 0.7) * 63;
-    spawnTree(Math.cos(a) * r, Math.sin(a) * r, 0.85 + rng() * 0.95);
+    const x = Math.cos(a) * r, z = Math.sin(a) * r;
+    if (pondAt(x, z)) continue;      // 水坑里不长树
+    spawnTree(x, z, 0.85 + rng() * 0.95);
   }
 
   for (let i = 0; i < 34; i++) {
     const a = rng() * Math.PI * 2;
     const r = 9 + rng() * 66;
     const x = Math.cos(a) * r, z = Math.sin(a) * r;
+    if (pondAt(x, z)) continue;
     const rock = new THREE.Mesh(geoRock, rng() > 0.45 ? matRock : matRockDark);
     const s = 0.5 + rng() * 1.6;
     rock.scale.set(s * rand(0.8, 1.4), s * rand(0.6, 1.1), s * rand(0.8, 1.4));
@@ -363,6 +506,7 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
         cx = Math.cos(a) * r; cz = Math.sin(a) * r;
       }
       const x = cx + rand(-1.5, 1.5), z = cz + rand(-1.5, 1.5);
+      if (pondAt(x, z)) { dummy.position.set(0, -999, 0); dummy.updateMatrix(); mesh.setMatrixAt(i, dummy.matrix); continue; }
       dummy.position.set(x, groundHeight(x, z) - 0.02, z);
       dummy.rotation.set(rand(-0.14, 0.14), rng() * Math.PI * 2, rand(-0.14, 0.14));
       dummy.scale.set(rand(0.7, 1.5), rand(0.7, 1.6), rand(0.7, 1.5));
@@ -809,8 +953,9 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
   /* ---------- MMD 模型（PMX 本地加载：冰之女皇 / 雷泽 / verity） ---------- */
   // PMX 模型本地正面朝 +Z，与游戏 heading=0（+Z）同向，无需额外旋转
   const MMD_YAW_FIX = 0;
-  // 笑脸怪的 PMX 与角色朝向相反，单独补 180°
-  const VERITY_YAW_FIX = 0;
+  // 笑脸怪的 PMX 正脸在 -Z，与 en.rotation 的 +Z 朝向相反，补 180°
+  const VERITY_YAW_FIX = Math.PI;
+  // 笑脸怪 PMX 的 UV 上下颠倒（嘴朝上），贴图单独翻转 Y 修正
   const mmdLoader = new MMDLoader();
   const MMD_PATHS = {
     anastasya: './resources/models/anastasya/anastasya.pmx',
@@ -971,6 +1116,16 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
     asset.holder.scale.set(1 + sq * 0.55, 1 - sq, 1 + sq * 0.55);
   }
 
+  // 只翻转一次 verity 自己的贴图（同一材质源在多只怪之间共享）
+  const verityFlippedMaps = new Set();
+  function flipVerityMap(mt) {
+    const m = mt && mt.map;
+    if (!m || verityFlippedMaps.has(m)) return;
+    verityFlippedMaps.add(m);
+    m.flipY = !m.flipY;
+    m.needsUpdate = true;
+  }
+
   function attachVerityVisual(en) {
     if (!mmdVerity || en.userData.mmd) return;
     const mesh = cloneSkeleton(mmdVerity.mesh);
@@ -982,6 +1137,7 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
       // 材质按怪独立克隆，受击发光才能各闪各的
       m.material = (Array.isArray(m.material) ? m.material : [m.material]).map((mt) => {
         const c = mt.clone();
+        flipVerityMap(c);
         if (c.emissive) mats.push(c);
         return c;
       });
@@ -1655,8 +1811,93 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
     spawnParticles(p, 0xb98cff, 52, 5.4, { up: 1.5, grav: 1.2, life: 1.0 });
     spawnParticles(p, 0xdff0ff, 34, 4.2, { up: 2.0, grav: 1.0, life: 0.8 });
     damageNumber(en.position.clone().add(new THREE.Vector3(0, 2.15, 0)), '超导', 'super');
-    state.shake = Math.max(state.shake, 0.6);
+    playReactionFx('superconduct', en.position.clone());
+    state.shake = Math.max(state.shake, 1.3);
     toast('超导！冰 × 雷', 1500);
+  }
+
+  /* ---------- 冻结（水中 + 冰）与反应全屏爆闪 ---------- */
+  const freezeShells = [];
+  const reactFxEl = document.getElementById('react-fx');
+  const stageElForShake = document.getElementById('stage');
+
+  function spawnFreezeShell(pos) {
+    const mat = new THREE.MeshStandardMaterial({
+      color: 0xd6f1ff, transparent: true, opacity: 0.92,
+      roughness: 0.1, metalness: 0.25, emissive: 0x5cc8ff, emissiveIntensity: 0.9,
+      flatShading: true,
+    });
+    const m = new THREE.Mesh(new THREE.IcosahedronGeometry(1.0, 0), mat);
+    m.position.copy(pos);
+    m.position.y += 1.0;
+    m.scale.setScalar(0.7);
+    world.add(m);
+    freezeShells.push({ m, t: 0, life: 1.2 });
+  }
+
+  function updateFreezeShells(dt) {
+    for (let i = freezeShells.length - 1; i >= 0; i--) {
+      const f = freezeShells[i];
+      f.t += dt;
+      const k = f.t / f.life;
+      if (k < 0.22) f.m.scale.setScalar(0.7 + k * 2.0);
+      f.m.material.opacity = 0.92 * Math.max(0, 1 - Math.max(0, k - 0.4) / 0.6);
+      f.m.rotation.y += dt * 0.9;
+      if (f.t >= f.life) {
+        spawnParticles(f.m.position.clone(), 0xd6f1ff, 30, 3.4, { up: 1.2, grav: 1.1 });
+        spawnParticles(f.m.position.clone(), 0xffffff, 18, 2.4, { up: 0.9, grav: 1.0 });
+        world.remove(f.m);
+        f.m.geometry.dispose();
+        f.m.material.dispose();
+        freezeShells.splice(i, 1);
+      }
+    }
+  }
+
+  function playReactionFx(kind, worldPos) {
+    const el = document.createElement('div');
+    el.className = 'react-burst ' + kind;
+    el.textContent = kind === 'freeze' ? '冻结' : '超导';
+    reactFxEl.appendChild(el);
+
+    camera.updateMatrixWorld(true);
+    const p = worldPos.clone().project(camera);
+    const sx = (p.x * 0.5 + 0.5) * window.innerWidth;
+    const sy = (-p.y * 0.5 + 0.5) * window.innerHeight;
+    const dx = clamp(sx - window.innerWidth / 2, -window.innerWidth * 0.32, window.innerWidth * 0.32);
+    const dy = clamp(sy - window.innerHeight / 2, -window.innerHeight * 0.32, window.innerHeight * 0.32);
+
+    const flash = document.createElement('div');
+    flash.className = 'react-flash ' + kind;
+    reactFxEl.appendChild(flash);
+    flash.animate([{ opacity: 0.92 }, { opacity: 0 }], { duration: 380, easing: 'ease-out' })
+      .onfinish = () => flash.remove();
+
+    const anim = el.animate([
+      { transform: 'translate(0px, 0px) scale(1.35)', opacity: 1, offset: 0 },
+      { transform: 'translate(0px, 0px) scale(1.06)', opacity: 0.95, offset: 0.2 },
+      { transform: 'translate(' + dx + 'px, ' + dy + 'px) scale(0.045)', opacity: 0, offset: 1 },
+    ], { duration: 1180, easing: 'cubic-bezier(.16,.86,.22,1)' });
+    anim.onfinish = () => el.remove();
+
+    stageElForShake.classList.remove('react-shake');
+    void stageElForShake.offsetWidth;
+    stageElForShake.classList.add('react-shake');
+    setTimeout(() => stageElForShake.classList.remove('react-shake'), 640);
+  }
+
+  function freezeEnemy(en) {
+    const u = en.userData;
+    u.aura = null;
+    u.auraT = 0;
+    if (u.auraIcon) u.auraIcon.visible = false;
+    if (u.auraShell) u.auraShell.visible = false;
+    spawnFreezeShell(en.position.clone());
+    hitEnemy(en, SUPERCONDUCT_DMG, 'freeze');
+    damageNumber(en.position.clone().add(new THREE.Vector3(0, 2.2, 0)), '冻结', 'freeze');
+    playReactionFx('freeze', en.position.clone());
+    state.shake = Math.max(state.shake, 1.3);
+    toast('冻结！水 × 冰', 1500);
   }
 
   function forwardVec() {
@@ -1679,12 +1920,17 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
       }
       const dmg = Math.round(baseDmg * rand(0.86, 1.18));
       const crit = Math.random() < 0.22;
+      const inPond = pondAt(en.position.x, en.position.z);
+      if (element === 'cryo' && inPond) {
+        freezeEnemy(en);
+      } else {
       const reacted = element ? applyAura(en, element) : null;
       if (reacted === 'superconduct') {
         hitEnemy(en, SUPERCONDUCT_DMG, 'super');
         superconductFx(en);
       } else {
         hitEnemy(en, crit ? Math.round(dmg * 1.7) : dmg, crit ? 'crit' : kind);
+      }
       }
       hits++;
       // 轻微击退
@@ -1700,13 +1946,16 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
     u.hp -= dmg;
     u.flash = 1;
     damageNumber(en.position.clone().add(new THREE.Vector3(0, 0.9, 0)), String(dmg), kind);
+    const hitColor = kind === 'super' ? 0xb98cff : (kind === 'freeze' ? 0xd6f1ff : accentColor().color);
     spawnParticles(en.position.clone().add(new THREE.Vector3(0, 0.7, 0)),
-      kind === 'super' ? 0xb98cff : accentColor().color, kind === 'super' ? 26 : 10, 2.6);
+      hitColor, kind === 'super' || kind === 'freeze' ? 26 : 10, 2.6);
 
     if (u.hp <= 0) {
       u.alive = false;
       u.respawn = 6;
-      en.visible = false;
+      // 元素反应击杀时先留 0.9s，让全屏特效收缩到怪身上后再消失
+      u.deathDelay = (kind === 'freeze' || kind === 'super') ? 0.9 : 0;
+      if (!u.deathDelay) en.visible = false;
       u.aura = null;
       u.auraT = 0;
       if (u.auraIcon) u.auraIcon.visible = false;
@@ -1979,6 +2228,10 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
     enemies.forEach((en) => {
       const u = en.userData;
       if (!u.alive) {
+        if (u.deathDelay > 0) {
+          u.deathDelay -= dt;
+          if (u.deathDelay <= 0) en.visible = false;
+        }
         u.respawn -= dt;
         if (u.respawn <= 0) {
           u.alive = true;
@@ -2093,8 +2346,10 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
       g.rotation.y += dt * 0.04;
     });
 
+    updateWaters(elapsed, dt);
     updateParticles(dt);
     updateEffects(dt);
+    updateFreezeShells(dt);
     updateFloaters(dt);
 
     /* ---------- 相机 ---------- */
@@ -2167,7 +2422,62 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
     sun.target.position.set(player.pos.x, player.pos.y, player.pos.z);
     sun.target.updateMatrixWorld();
 
+    updateEnemyMarks();
     updateHUD();
+  }
+
+  /* ---------- 怪物方位箭头（只在屏幕外时贴屏幕边缘显示） ---------- */
+  let enemyMarks = null;
+  function updateEnemyMarks() {
+    if (!state.started) return;
+    if (!enemyMarks) {
+      const layer = document.getElementById('enemy-markers');
+      if (!layer) return;
+      enemyMarks = enemies.map((en) => {
+        const el = document.createElement('div');
+        el.className = 'enemy-mark';
+        el.innerHTML = '<span class="mark-arrow"></span><span class="mark-dist"></span>';
+        layer.appendChild(el);
+        return { el, arrow: el.querySelector('.mark-arrow'), dist: el.querySelector('.mark-dist'), en };
+      });
+    }
+    camera.updateMatrixWorld(true);
+    const camDir = new THREE.Vector3();
+    camera.getWorldDirection(camDir);
+    camDir.y = 0;
+    if (camDir.lengthSq() < 1e-5) return;
+    camDir.normalize();
+    const right = new THREE.Vector3(camDir.z, 0, -camDir.x);
+    const W = window.innerWidth, H = window.innerHeight;
+
+    enemyMarks.forEach((m) => {
+      const en = m.en;
+      const u = en.userData;
+      if (!u.alive || !en.visible) { m.el.classList.remove('is-on'); return; }
+      const world = en.position.clone().add(new THREE.Vector3(0, 0.9, 0));
+      const rel = world.clone().sub(camera.position);
+      const len = rel.length();
+      if (len < 1.2) { m.el.classList.remove('is-on'); return; }
+
+      const a = rel.dot(right) / len;
+      const b = rel.dot(camDir) / len;
+      const p = world.project(camera);
+      const behind = b < -0.02;
+      const onScreen = !behind && Math.abs(p.x) < 0.92 && Math.abs(p.y) < 0.92;
+      if (onScreen) { m.el.classList.remove('is-on'); return; }
+
+      let dx = a, dy = -b;
+      if (behind) dy = Math.abs(dy) + 0.25;
+      const mag = Math.max(Math.abs(dx), Math.abs(dy)) || 1;
+      dx /= mag; dy /= mag;
+      const ex = W * 0.46, ey = H * 0.43;
+      const px = W / 2 + dx * ex, py = H / 2 + dy * ey;
+
+      m.el.classList.add('is-on');
+      m.el.style.transform = 'translate(' + px.toFixed(1) + 'px, ' + py.toFixed(1) + 'px)';
+      m.arrow.style.transform = 'rotate(' + (Math.atan2(dy, dx) * 180 / Math.PI + 90).toFixed(1) + 'deg)';
+      m.dist.textContent = Math.round(len) + 'm';
+    });
   }
 
   /* =========================================================

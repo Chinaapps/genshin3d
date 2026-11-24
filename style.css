@@ -610,3 +610,73 @@ html, body {
 @media (max-width: 760px) {
   .ver-tag { left: 10px; bottom: 6px; font-size: 10px; padding: 3px 8px; }
 }
+
+/* ============ 怪物方位指示（屏幕边缘红色箭头） ============ */
+.enemy-markers { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 6; }
+.enemy-mark {
+  position: absolute; left: 0; top: 0;
+  width: 46px; height: 46px; margin: -23px 0 0 -23px;
+  display: flex; align-items: center; justify-content: center;
+  transform-origin: 50% 50%;
+  opacity: 0; transition: opacity .16s linear;
+  will-change: transform, opacity;
+}
+.enemy-mark.is-on { opacity: 1; }
+.enemy-mark .mark-arrow {
+  width: 0; height: 0;
+  border-left: 11px solid transparent;
+  border-right: 11px solid transparent;
+  border-bottom: 19px solid #ff4b4b;
+  filter: drop-shadow(0 0 6px rgba(255, 60, 60, .95)) drop-shadow(0 0 14px rgba(255, 30, 30, .5));
+}
+.enemy-mark .mark-dist {
+  position: absolute; bottom: -13px; left: 50%; transform: translateX(-50%);
+  font-size: 11px; font-weight: 800; color: #ffb3b3; letter-spacing: .5px;
+  text-shadow: 0 0 4px rgba(0, 0, 0, .9), 0 0 8px rgba(255, 40, 40, .6);
+  white-space: nowrap;
+}
+
+/* ============ 元素反应全屏爆闪 → 收束到怪物 ============ */
+.react-fx { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 7; }
+.react-burst {
+  position: absolute; left: 50%; top: 50%;
+  width: 150vmax; height: 150vmax; margin: -75vmax 0 0 -75vmax;
+  border-radius: 50%; transform-origin: 50% 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 6.2vmin; font-weight: 900; letter-spacing: .14em;
+  color: #fff; text-shadow: 0 0 18px rgba(255, 255, 255, .95), 0 0 40px rgba(170, 110, 255, .9);
+  mix-blend-mode: screen;
+}
+.react-burst.superconduct {
+  background: radial-gradient(circle at 50% 50%,
+    rgba(255,255,255,.95) 0%, rgba(196,140,255,.85) 18%,
+    rgba(140,80,255,.55) 38%, rgba(90,40,180,.18) 62%, rgba(0,0,0,0) 78%);
+}
+.react-burst.freeze {
+  background: radial-gradient(circle at 50% 50%,
+    rgba(255,255,255,.95) 0%, rgba(175,235,255,.85) 18%,
+    rgba(110,200,255,.55) 38%, rgba(40,120,190,.2) 62%, rgba(0,0,0,0) 78%);
+  text-shadow: 0 0 18px rgba(255, 255, 255, .95), 0 0 40px rgba(120, 210, 255, .95);
+}
+
+.floater.freeze {
+  font-size: 30px; color: #d6f1ff;
+  text-shadow: 0 0 10px rgba(140, 220, 255, .95), 0 0 22px rgba(90, 180, 255, .75), 0 2px 6px rgba(0, 0, 0, .7);
+}
+
+#stage.react-shake { animation: reactShake .6s cubic-bezier(.36,.07,.19,.97) both; }
+@keyframes reactShake {
+  0%   { transform: translate(0, 0) scale(1.03) rotate(0deg); }
+  8%   { transform: translate(-9px, 6px) scale(1.03) rotate(-.4deg); }
+  18%  { transform: translate(8px, -7px) scale(1.03) rotate(.35deg); }
+  28%  { transform: translate(-7px, -4px) scale(1.03) rotate(-.3deg); }
+  38%  { transform: translate(6px, 6px) scale(1.03) rotate(.3deg); }
+  50%  { transform: translate(-5px, 3px) scale(1.03) rotate(-.2deg); }
+  62%  { transform: translate(4px, -3px) scale(1.03) rotate(.18deg); }
+  76%  { transform: translate(-2px, 2px) scale(1.03) rotate(-.1deg); }
+  100% { transform: translate(0, 0) scale(1.03) rotate(0deg); }
+}
+
+.react-flash { position: absolute; inset: 0; pointer-events: none; }
+.react-flash.superconduct { background: radial-gradient(circle at 50% 50%, rgba(255,255,255,.95) 0%, rgba(190,140,255,.7) 45%, rgba(120,70,200,.15) 75%, rgba(0,0,0,0) 100%); }
+.react-flash.freeze { background: radial-gradient(circle at 50% 50%, rgba(255,255,255,.95) 0%, rgba(170,235,255,.7) 45%, rgba(80,170,230,.16) 75%, rgba(0,0,0,0) 100%); }
