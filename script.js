@@ -2054,8 +2054,9 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
     if (!state.started || state.skillCd > 0) return;
     const el = accentColor();
     const elKey = PARTY[state.active].element;
-    playSfxAt(elKey === 'cryo' ? 'cryoSkill' : 'electroSkill', 0.95, false);
-    if (elKey === 'cryo' && Math.random() < 0.5) playSfxAt('ding', 0.8, false);
+    // 音效文件已按 120% 做过电平校正，这里直接满音量播放
+    playSfxAt(elKey === 'cryo' ? 'cryoSkill' : 'electroSkill', 1, false);
+    if (elKey === 'cryo' && Math.random() < 0.5) playSfxAt('ding', 1, false);
     state.skillCd = CFG.skillCd;
     state.energy = Math.min(CFG.energyMax, state.energy + CFG.energyPerSkill);
     state.shake = Math.max(state.shake, 0.5);
@@ -2105,7 +2106,7 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
   function switchCharacter(i) {
     if (i === state.active || i < 0 || i >= PARTY.length || !state.started) return;
     const old = player.pos.clone();
-    playSfxAt('switchChar', 0.85, false);
+    playSfxAt('switchChar', 1, false);
     state.active = i;
     buildPlayer();
     player.pos.copy(old);
