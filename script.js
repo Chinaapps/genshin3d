@@ -50,6 +50,45 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
   const SPAWN = { x: 0, z: 5.5 };
 
   /* =========================================================
+     0.5 音效
+     ========================================================= */
+  const SFX_FILES = {
+    start: 'genshin-start.mp3',
+    cryoSkill: 'cryo-skill.mp3',
+    electroSkill: 'electro-skill.mp3',
+    switchChar: 'switch.mp3',
+    ding: 'ding.mp3',
+  };
+  const SFX = {};
+  (function initSfx() {
+    Object.keys(SFX_FILES).forEach((k) => {
+      const a = new Audio('./resources/audio/' + SFX_FILES[k]);
+      a.preload = 'auto';
+      a.load();
+      SFX[k] = a;
+    });
+  })();
+
+  function playSfxAt(key, vol, loop) {
+    const base = SFX[key];
+    if (!base) return null;
+    const node = base.cloneNode(true);
+    node.volume = vol == null ? 1 : vol;
+    node.loop = !!loop;
+    node.currentTime = 0;
+    const p = node.play();
+    if (p && p.catch) p.catch(() => {});
+    return node;
+  }
+
+  let bootBgm = null;
+  let bootBgmDone = false;
+  // 加载界面就开始（浏览器允许时），点击开始 / 加载完成时再补一次
+  setTimeout(() => {
+    if (!bootBgmDone) bootBgm = playSfxAt('start', 0.7, true);
+  }, 260);
+
+  /* =========================================================
      1. 小工具
      ========================================================= */
   const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -82,10 +121,10 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
 
   // 水坑：地形挖坑 + 水面（水没有碰撞，可直接走进去）
   const WATER_PONDS = [
-    { x: -12.5, z: 10.5, r: 3.8, depth: 1.6 },
-    { x: 13.0, z: -7.0, r: 3.4, depth: 1.4 },
-    { x: 5.5, z: 17.5, r: 4.4, depth: 1.9 },
-    { x: -16.0, z: -9.0, r: 3.0, depth: 1.2 },
+    { x: -12.5, z: 10.5, r: 2.5, depth: 1.05 },
+    { x: 13.0, z: -7.0, r: 2.3, depth: 0.95 },
+    { x: 5.5, z: 17.5, r: 2.7, depth: 1.15 },
+    { x: -16.0, z: -9.0, r: 2.1, depth: 0.85 },
   ];
   WATER_PONDS.forEach((p) => { p.waterY = 0; });
 
@@ -302,7 +341,6 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
     wx.beginPath();
     wx.arc(128, 128, 124, 0, Math.PI * 2);
     wx.fill();
-    // 水面反光斑
     for (let i = 0; i < 60; i++) {
       const x = 30 + Math.random() * 196, y = 30 + Math.random() * 196;
       wx.strokeStyle = 'rgba(235,250,255,' + (0.2 + Math.random() * 0.35) + ')';
@@ -319,13 +357,46 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
     const rockGeo = new THREE.IcosahedronGeometry(1, 0);
     const rockMat = new THREE.MeshStandardMaterial({ color: 0x8f948a, roughness: 0.95, flatShading: true });
     const rockMat2 = new THREE.MeshStandardMaterial({ color: 0x7b8a76, roughness: 0.95, flatShading: true });
-    WATER_PONDS.forEach((p) => {
-      const rimY = groundHeight(p.x + p.r * 1.02, p.z);
-      const waterY = rimY - 0.5;
-      p.waterY = waterY;
+    // 池壁 / 池底（泥色，双面防止从水下看穿）
+    const mudMat = new THREE.MeshBasicMaterial({ color: 0x5f6448, side: THREE.DoubleSide });
+    const mudDark = new THREE.MeshBasicMaterial({ color: 0x3f4836, side: THREE.DoubleSide });
+    // 整块透明水体
+    const waterBodyMat = new THREE.MeshStandardMaterial({
+      color: 0x2f86b8, transparent: true, opacity: 0.5,
+      roughness: 0.14, metalness: 0.2, depthWrite: false, side: THREE.DoubleSide,
+    });
 
-      // 不规则池形：圆盘顶点做半径抖动
-      const wGeo = new THREE.CircleGeometry(p.r * 0.8, 56);
+    WATER_PONDS.forEach((p) => {
+      const rimY = groundHeight(p.x + p.r * 1.05, p.z);
+      const bottomY = groundHeight(p.x, p.z);
+      const waterY = rimY - 0.3;
+      p.waterY = waterY;
+      const R = p.r * 0.84;
+      const h = Math.max(0.8, waterY - bottomY + 0.1);
+
+      // 池壁（内壁挡住地形下面的空洞，顶沿压在水面以下）
+      const wallH = Math.max(0.5, waterY - bottomY);
+      const wall = new THREE.Mesh(
+        new THREE.CylinderGeometry(R * 1.06, R * 0.7, wallH, 30, 1, true), mudMat
+      );
+      wall.position.set(p.x, bottomY + wallH / 2 - 0.05, p.z);
+      world.add(wall);
+
+      // 池底
+      const bed = new THREE.Mesh(new THREE.CircleGeometry(R * 0.78, 30), mudDark);
+      bed.rotation.x = -Math.PI / 2;
+      bed.position.set(p.x, bottomY + 0.04, p.z);
+      world.add(bed);
+
+      // 整块透明水体（有顶有底，看起来是一整块水）
+      const body = new THREE.Mesh(
+        new THREE.CylinderGeometry(R, R * 0.8, h, 30, 1, false), waterBodyMat
+      );
+      body.position.set(p.x, bottomY + h / 2 + 0.03, p.z);
+      world.add(body);
+
+      // 水面薄层（带渐变纹理）
+      const wGeo = new THREE.CircleGeometry(R * 1.01, 44);
       const wPos = wGeo.attributes.position;
       for (let vi = 1; vi < wPos.count; vi++) {
         const x = wPos.getX(vi), y = wPos.getY(vi);
@@ -337,14 +408,13 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
       const surf = new THREE.Mesh(
         wGeo,
         new THREE.MeshStandardMaterial({
-          map: waterTex, transparent: true, opacity: 0.62,
+          map: waterTex, transparent: true, opacity: 0.55,
           roughness: 0.12, metalness: 0.35, depthWrite: false, side: THREE.DoubleSide,
         })
       );
       surf.rotation.x = -Math.PI / 2;
-      surf.position.set(p.x, waterY, p.z);
-      surf.receiveShadow = true;
-      surf.userData.baseY = waterY;
+      surf.position.set(p.x, waterY + 0.02, p.z);
+      surf.userData.baseY = waterY + 0.02;
       surf.userData.phase = Math.random() * 6.28;
       world.add(surf);
       waterSurfaces.push(surf);
@@ -352,26 +422,26 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
       // 水面涟漪圈
       for (let k = 0; k < 2; k++) {
         const ring = new THREE.Mesh(
-          new THREE.RingGeometry(p.r * (0.55 + k * 0.2), p.r * (0.6 + k * 0.2), 40),
+          new THREE.RingGeometry(R * (0.62 + k * 0.18), R * (0.67 + k * 0.18), 36),
           new THREE.MeshBasicMaterial({
-            color: 0xd6f2ff, transparent: true, opacity: 0.16,
+            color: 0xd6f2ff, transparent: true, opacity: 0.14,
             blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
           })
         );
         ring.rotation.x = -Math.PI / 2;
-        ring.position.set(p.x, waterY + 0.02, p.z);
-        ring.userData = { baseY: waterY + 0.02, phase: k * 2.1, r: p.r };
+        ring.position.set(p.x, waterY + 0.03, p.z);
+        ring.userData = { baseY: waterY + 0.03, phase: k * 2.1, r: R };
         world.add(ring);
         rippleRing.push(ring);
       }
 
       // 池边一圈石头
-      const n = Math.max(7, Math.round(p.r * 2.4));
+      const n = Math.max(6, Math.round(p.r * 3.0));
       for (let k = 0; k < n; k++) {
         const a = (k / n) * Math.PI * 2 + rand(-0.12, 0.12);
-        const rr = p.r * rand(0.98, 1.1);
+        const rr = p.r * rand(1.0, 1.12);
         const x = p.x + Math.cos(a) * rr, z = p.z + Math.sin(a) * rr;
-        const sc = rand(0.34, 0.7);
+        const sc = rand(0.26, 0.52);
         const rock = new THREE.Mesh(rockGeo, Math.random() < 0.5 ? rockMat : rockMat2);
         rock.position.set(x, groundHeight(x, z) + sc * 0.35, z);
         rock.scale.set(sc, sc * rand(0.6, 0.85), sc);
@@ -1983,6 +2053,9 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
   function useSkill() {
     if (!state.started || state.skillCd > 0) return;
     const el = accentColor();
+    const elKey = PARTY[state.active].element;
+    playSfxAt(elKey === 'cryo' ? 'cryoSkill' : 'electroSkill', 0.95, false);
+    if (elKey === 'cryo' && Math.random() < 0.5) playSfxAt('ding', 0.8, false);
     state.skillCd = CFG.skillCd;
     state.energy = Math.min(CFG.energyMax, state.energy + CFG.energyPerSkill);
     state.shake = Math.max(state.shake, 0.5);
@@ -2032,6 +2105,7 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
   function switchCharacter(i) {
     if (i === state.active || i < 0 || i >= PARTY.length || !state.started) return;
     const old = player.pos.clone();
+    playSfxAt('switchChar', 0.85, false);
     state.active = i;
     buildPlayer();
     player.pos.copy(old);
@@ -2436,9 +2510,9 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
       enemyMarks = enemies.map((en) => {
         const el = document.createElement('div');
         el.className = 'enemy-mark';
-        el.innerHTML = '<span class="mark-arrow"></span><span class="mark-dist"></span>';
+        el.innerHTML = '<span class="mark-arrow"></span>';
         layer.appendChild(el);
-        return { el, arrow: el.querySelector('.mark-arrow'), dist: el.querySelector('.mark-dist'), en };
+        return { el, arrow: el.querySelector('.mark-arrow'), en };
       });
     }
     camera.updateMatrixWorld(true);
@@ -2476,7 +2550,6 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
       m.el.classList.add('is-on');
       m.el.style.transform = 'translate(' + px.toFixed(1) + 'px, ' + py.toFixed(1) + 'px)';
       m.arrow.style.transform = 'rotate(' + (Math.atan2(dy, dx) * 180 / Math.PI + 90).toFixed(1) + 'deg)';
-      m.dist.textContent = Math.round(len) + 'm';
     });
   }
 
@@ -2627,6 +2700,10 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
   ui.startBtn.addEventListener('click', () => {
     if (ui.startBtn.disabled) return;
     state.started = true;
+    // 加载完成后的启动音效（点击即获得播放权限）
+    try { if (bootBgm) { bootBgm.pause(); bootBgm = null; } } catch (e) {}
+    playSfxAt('start', 0.9, false);
+    bootBgmDone = true;
     ui.start.classList.add('is-hidden');
     toast('WASD 移动 · 拖动画面转视角 · E / Q 释放技能', 2600);
     // 初始给一点能量，方便直接体验爆发
