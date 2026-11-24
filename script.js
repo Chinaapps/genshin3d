@@ -990,10 +990,11 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
     const holder = new THREE.Group();
     holder.rotation.y = VERITY_YAW_FIX;
     holder.add(mesh);
-    en.children.slice().forEach((c) => { c.visible = false; });
+    en.children.slice().forEach((c) => { if (!c.userData.auraFx) c.visible = false; });
     en.add(holder);
     en.userData.mmd = holder;
     en.userData.mmdMats = mats;
+    en.userData.mmdColors = mats.map((mt) => mt.color.clone());
   }
 
   function onModelsReady() {
@@ -1099,12 +1100,39 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
     g.add(leaf);
 
     g.traverse((m) => { if (m.isMesh) m.castShadow = true; });
+
+    // 元素附着图标（冰/雷），默认隐藏
+    const auraIcon = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: null, transparent: true, depthWrite: false, depthTest: false, opacity: 0.95,
+    }));
+    auraIcon.position.set(0, 2.15, 0);
+    auraIcon.scale.set(0.62, 0.62, 1);
+    auraIcon.visible = false;
+    auraIcon.renderOrder = 999;
+    auraIcon.userData.auraFx = true;
+    g.add(auraIcon);
+
+    // 元素附着光壳：让怪物整体明显染上冰/雷色
+    const auraShell = new THREE.Mesh(
+      new THREE.SphereGeometry(1.12, 20, 14),
+      new THREE.MeshBasicMaterial({
+        color: 0x2f7bff, transparent: true, opacity: 0,
+        depthWrite: false, side: THREE.DoubleSide,
+      })
+    );
+    auraShell.position.y = 0.62;
+    auraShell.scale.set(1.1, 1.0, 1.1);
+    auraShell.visible = false;
+    auraShell.userData.auraFx = true;
+    g.add(auraShell);
+
     g.userData = {
       body, mat, leaf,
       hp: 240, maxHp: 240, alive: true, respawn: 0,
       home: new THREE.Vector3(),
       bobPhase: Math.random() * 6.28,
       flash: 0,
+      aura: null, auraT: 0, auraIcon, auraShell,
     };
     world.add(g);
     enemies.push(g);
@@ -1520,11 +1548,122 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
   /* =========================================================
      11. 战斗
      ========================================================= */
+  // 元素附着 / 超导
+  const AURA_TIME = 5.5;             // 附着残留 5.5 秒
+  const SUPERCONDUCT_DMG = 80000;    // 冰 + 雷 → 超导 80000 伤害
+  const AURA_EMISSIVE = {
+    cryo: new THREE.Color(0x2c6bff),
+    electro: new THREE.Color(0x8b46ff),
+  };
+  const AURA_TINT = {
+    cryo: new THREE.Color(0xa8d4ff),
+    electro: new THREE.Color(0xcaaaff),
+  };
+
+  function makeAuraTexture(kind) {
+    const size = 128;
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = size;
+    const ctx = cv.getContext('2d');
+    const main = kind === 'cryo' ? '#b9e6ff' : '#e0c8ff';
+    ctx.beginPath();
+    ctx.arc(64, 64, 50, 0, Math.PI * 2);
+    ctx.fillStyle = kind === 'cryo' ? 'rgba(38, 86, 150, .78)' : 'rgba(92, 58, 158, .78)';
+    ctx.fill();
+    ctx.lineWidth = 5;
+    ctx.strokeStyle = main;
+    ctx.stroke();
+
+    ctx.strokeStyle = '#ffffff';
+    ctx.fillStyle = '#ffffff';
+    ctx.lineWidth = 4;
+    if (kind === 'cryo') {
+      // 六角雪花
+      for (let i = 0; i < 3; i++) {
+        const a = (i / 3) * Math.PI;
+        ctx.beginPath();
+        ctx.moveTo(64 - Math.cos(a) * 30, 64 - Math.sin(a) * 30);
+        ctx.lineTo(64 + Math.cos(a) * 30, 64 + Math.sin(a) * 30);
+        ctx.stroke();
+      }
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2;
+        const x = 64 + Math.cos(a) * 22, y = 64 + Math.sin(a) * 22;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + Math.cos(a + 0.5) * 10, y + Math.sin(a + 0.5) * 10);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + Math.cos(a - 0.5) * 10, y + Math.sin(a - 0.5) * 10);
+        ctx.stroke();
+      }
+    } else {
+      // 闪电
+      ctx.beginPath();
+      ctx.moveTo(74, 24);
+      ctx.lineTo(44, 70);
+      ctx.lineTo(62, 70);
+      ctx.lineTo(52, 104);
+      ctx.lineTo(86, 56);
+      ctx.lineTo(66, 56);
+      ctx.closePath();
+      ctx.fill();
+    }
+    const tex = new THREE.CanvasTexture(cv);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  }
+  const AURA_TEX = { cryo: makeAuraTexture('cryo'), electro: makeAuraTexture('electro') };
+
+  function applyAura(en, element) {
+    const u = en.userData;
+    if (!u.aura) {
+      u.aura = element;
+      u.auraT = AURA_TIME;
+      u.auraEnd = performance.now() + AURA_TIME * 1000;
+      if (u.auraIcon) {
+        u.auraIcon.material.map = AURA_TEX[element];
+        u.auraIcon.material.needsUpdate = true;
+        u.auraIcon.visible = true;
+      }
+      spawnParticles(
+        en.position.clone().add(new THREE.Vector3(0, 1.3, 0)),
+        ELEMENTS[element].color, 14, 2.0, { up: 0.9, grav: 0.4, life: 0.7 }
+      );
+      damageNumber(en.position.clone().add(new THREE.Vector3(0, 1.9, 0)),
+        element === 'cryo' ? '附着 · 冰' : '附着 · 雷', 'aura');
+      return null;
+    }
+    if (u.aura === element) {
+      u.auraT = AURA_TIME;   // 同元素刷新残留时间
+      u.auraEnd = performance.now() + AURA_TIME * 1000;
+      return null;
+    }
+    // 冰 × 雷 → 超导
+    u.aura = null;
+    u.auraT = 0;
+    if (u.auraIcon) u.auraIcon.visible = false;
+    if (u.auraShell) u.auraShell.visible = false;
+    return 'superconduct';
+  }
+
+  function superconductFx(en) {
+    const p = en.position.clone().add(new THREE.Vector3(0, 1.0, 0));
+    spawnRing(en.position.clone(), 0xb07cff, 3.4, 0.55);
+    spawnRing(en.position.clone(), 0x9fd4ff, 2.2, 0.45, 0.55);
+    spawnParticles(p, 0xb98cff, 52, 5.4, { up: 1.5, grav: 1.2, life: 1.0 });
+    spawnParticles(p, 0xdff0ff, 34, 4.2, { up: 2.0, grav: 1.0, life: 0.8 });
+    damageNumber(en.position.clone().add(new THREE.Vector3(0, 2.15, 0)), '超导', 'super');
+    state.shake = Math.max(state.shake, 0.6);
+    toast('超导！冰 × 雷', 1500);
+  }
+
   function forwardVec() {
     return new THREE.Vector3(Math.sin(player.heading), 0, Math.cos(player.heading));
   }
 
-  function damageEnemies(origin, radius, forwardOnly, baseDmg, kind) {
+  function damageEnemies(origin, radius, forwardOnly, baseDmg, kind, element) {
     let hits = 0;
     const fwd = forwardVec();
     enemies.forEach((en) => {
@@ -1540,7 +1679,13 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
       }
       const dmg = Math.round(baseDmg * rand(0.86, 1.18));
       const crit = Math.random() < 0.22;
-      hitEnemy(en, crit ? Math.round(dmg * 1.7) : dmg, crit ? 'crit' : kind);
+      const reacted = element ? applyAura(en, element) : null;
+      if (reacted === 'superconduct') {
+        hitEnemy(en, SUPERCONDUCT_DMG, 'super');
+        superconductFx(en);
+      } else {
+        hitEnemy(en, crit ? Math.round(dmg * 1.7) : dmg, crit ? 'crit' : kind);
+      }
       hits++;
       // 轻微击退
       const push = d.clone().multiplyScalar(0.55);
@@ -1555,12 +1700,17 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
     u.hp -= dmg;
     u.flash = 1;
     damageNumber(en.position.clone().add(new THREE.Vector3(0, 0.9, 0)), String(dmg), kind);
-    spawnParticles(en.position.clone().add(new THREE.Vector3(0, 0.7, 0)), accentColor().color, 10, 2.6);
+    spawnParticles(en.position.clone().add(new THREE.Vector3(0, 0.7, 0)),
+      kind === 'super' ? 0xb98cff : accentColor().color, kind === 'super' ? 26 : 10, 2.6);
 
     if (u.hp <= 0) {
       u.alive = false;
       u.respawn = 6;
       en.visible = false;
+      u.aura = null;
+      u.auraT = 0;
+      if (u.auraIcon) u.auraIcon.visible = false;
+      if (u.auraShell) u.auraShell.visible = false;
       spawnParticles(en.position.clone().add(new THREE.Vector3(0, 0.6, 0)), 0xffe9a8, 26, 4.2);
       spawnRing(en.position.clone(), accentColor().color, 2.2, 0.5);
       damageNumber(en.position.clone().add(new THREE.Vector3(0, 1.6, 0)), '击破', 'crit');
@@ -1573,7 +1723,7 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
     player.swingT = 1;
     state.shake = Math.max(state.shake, 0.25);
     const origin = player.pos.clone();
-    const hits = damageEnemies(origin, CFG.attackRange, true, 92, '');
+    const hits = damageEnemies(origin, CFG.attackRange, true, 92, '', PARTY[state.active].element);
     if (hits > 0) {
       state.energy = Math.min(CFG.energyMax, state.energy + CFG.energyPerHit);
       const tip = player.pos.clone().add(forwardVec().multiplyScalar(1.5)).add(new THREE.Vector3(0, 1.4, 0));
@@ -1594,7 +1744,7 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
     spawnPillar(c, el.color);
     spawnParticles(c.clone().add(new THREE.Vector3(0, 0.6, 0)), el.color, 46, 5.2, { up: 1.5, grav: 1.2 });
 
-    const hits = damageEnemies(c, 5.6, false, 200, '');
+    const hits = damageEnemies(c, 5.6, false, 200, '', PARTY[state.active].element);
     if (hits === 0) spawnParticles(c.clone().add(new THREE.Vector3(0, 1, 0)), el.color, 12, 2.4);
     toast(`元素战技 · ${el.name}`);
   }
@@ -1617,7 +1767,7 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
     spawnPillar(c, el.color);
     spawnParticles(c.clone().add(new THREE.Vector3(0, 0.8, 0)), el.glow, 130, 8.5, { up: 1.2, grav: 1.6, life: 1.25 });
 
-    damageEnemies(c, 9.2, false, 480, 'crit');
+    damageEnemies(c, 9.2, false, 480, 'crit', PARTY[state.active].element);
     toast(`元素爆发 · ${el.name}`, 2000);
   }
 
@@ -1865,6 +2015,35 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
         u.mmd.position.y = bob * 0.22;
       }
 
+      // 元素附着计时与表现
+      if (u.aura) {
+        // 用真实时钟计时，避免低帧率把 5.5 秒拉长
+        u.auraT = Math.max(0, (u.auraEnd - performance.now()) / 1000);
+        if (u.auraT <= 0) {
+          u.aura = null;
+          u.auraT = 0;
+          if (u.auraIcon) u.auraIcon.visible = false;
+          if (u.auraShell) u.auraShell.visible = false;
+        } else {
+          if (u.auraIcon) {
+            const s2 = 0.46 + 0.08 * Math.sin(elapsed * 7 + u.bobPhase);
+            u.auraIcon.scale.set(s2, s2, 1);
+          }
+          if (u.auraShell) {
+            u.auraShell.visible = true;
+            u.auraShell.material.color.setHex(u.aura === 'cryo' ? 0x2f7bff : 0x8236ff);
+            u.auraShell.material.opacity = 0.26 + 0.10 * Math.sin(elapsed * 6.5 + u.bobPhase);
+            u.auraShell.rotation.y += dt * 0.7;
+          }
+          if (Math.random() < dt * 7) {
+            spawnParticles(
+              en.position.clone().add(new THREE.Vector3(rand(-0.45, 0.45), rand(1.0, 1.6), rand(-0.45, 0.45))),
+              ELEMENTS[u.aura].color, 1, 1.0, { up: 0.9, grav: -0.5, life: 0.9 }
+            );
+          }
+        }
+      }
+
       // 受击闪光
       if (u.flash > 0) {
         u.flash = Math.max(0, u.flash - dt * 4);
@@ -1873,11 +2052,28 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
       } else {
         en.scale.setScalar(1);
       }
-      // MMD 怪受击泛红
       if (u.mmdMats) {
-        const g = 0.14 + Math.max(0, u.flash) * 0.62;
+        // 附着时整体染色（冰 → 淡蓝，雷 → 淡紫）
+        const tint = u.aura && u.auraT > 0
+          ? (u.aura === 'cryo' ? AURA_TINT.cryo : AURA_TINT.electro)
+          : null;
         for (let mi = 0; mi < u.mmdMats.length; mi++) {
-          u.mmdMats[mi].emissive.setRGB(g, 0.14, 0.14);
+          u.mmdMats[mi].color.copy(u.mmdColors[mi]);
+          if (tint) u.mmdMats[mi].color.multiply(tint);
+        }
+      }
+      // MMD 怪：附着时染元素色，否则受击泛红
+      if (u.mmdMats) {
+        if (u.aura && u.auraT > 0) {
+          const pulse = 0.34 + 0.16 * Math.sin(elapsed * 6 + u.bobPhase) + Math.max(0, u.flash) * 0.5;
+          for (let mi = 0; mi < u.mmdMats.length; mi++) {
+            u.mmdMats[mi].emissive.copy(AURA_EMISSIVE[u.aura]).multiplyScalar(pulse);
+          }
+        } else {
+          const g = 0.14 + Math.max(0, u.flash) * 0.62;
+          for (let mi = 0; mi < u.mmdMats.length; mi++) {
+            u.mmdMats[mi].emissive.setRGB(g, 0.14, 0.14);
+          }
         }
       }
 

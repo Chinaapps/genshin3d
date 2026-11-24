@@ -338,6 +338,11 @@ html, body {
   white-space: nowrap;
 }
 .floater.crit { font-size: 26px; color: #ffe08a; }
+.floater.aura { font-size: 18px; color: #cfe9ff; }
+.floater.super {
+  font-size: 30px; color: #d8b4ff;
+  text-shadow: 0 0 10px rgba(179, 120, 255, .95), 0 0 22px rgba(120, 190, 255, .7), 0 2px 6px rgba(0, 0, 0, .7);
+}
 .floater.heal { color: #b4f7c0; }
 .floater.hurt { color: #ff8f7a; }
 
